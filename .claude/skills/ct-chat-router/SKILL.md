@@ -8,7 +8,7 @@ description: Project map, key code facts and known pitfalls for CT-Chat-Router (
 Repo root (git, branch main); paths are relative to it. Plan docs: `PLAN_v2.md` (current), `BUGS.md`, `BACKLOG.md`, `DESIGN_P3.md`. Stale docs are archived in `docs/archive/` (`PLAN_20261012.md`, `HANDOVER.md`). Working rules (who writes code, commit format, confirm-before-commit) are in the repo's `CLAUDE.md`.
 
 ## What it is
-Multi-model AI chat app. Frontend React 19 + Vite 7 + Tailwind v4 + lucide-react + react-icons (single entry `frontend/src/App.jsx`). Backend FastAPI + SQLModel/SQLAlchemy + PostgreSQL (`backend/main.py`). Conversations are a tree: `Message.parent_id` self-reference, root has `parent_id IS NULL`. Models: `gemini*` prefix routes to Google GenAI SDK (`gemini_llm.py`), everything else to OpenRouter (`openrouter_llm.py`). Responses stream via SSE. Deploy: Docker Compose (db / pgadmin / api), Render for prod demo.
+Multi-model AI chat app. Frontend React 19 + Vite 7 + Tailwind v4 + lucide-react + react-icons (single entry `frontend/src/App.jsx`). Backend FastAPI + SQLModel/SQLAlchemy + PostgreSQL (`backend/main.py`). Conversations are a tree: `Message.parent_id` self-reference, root has `parent_id IS NULL`. Models: `gemini*` prefix routes to Google GenAI SDK (`gemini_llm.py`), everything else to OpenRouter (`openrouter_llm.py`). Responses stream via SSE. Deploy: Docker Compose; local dev uses `docker-compose.yml`, production runs on an EC2 VM with `docker-compose.prod.yml` (see CLAUDE.md).
 
 ## Key code facts
 - Dependencies via uv: `backend/pyproject.toml` + `backend/uv.lock`; `backend/Dockerfile` installs with `uv export` + `uv pip install --system`. `backend/requirements.txt` is STALE (ignore it).
