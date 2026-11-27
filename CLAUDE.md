@@ -14,6 +14,12 @@ Reply in the language the user writes in.
 - Commit-message format: subagents often deviate. Write the exact message in the task text and say "EXACTLY", then `git log --oneline -3` to confirm before pushing.
 - Parallel work: subagents share ONE working dir. Before dispatching a batch, grep which files each task touches and run in parallel only tasks with disjoint file sets. Same-file tasks are serialized or folded into one subagent making two separate commits. If `git commit` fails on `index.lock`, retry once after 2 s.
 
+## Code comments
+- Comment only what the code cannot say: a non-obvious why, an invariant, an ordering requirement, a security constraint. One line where possible.
+- No task ids in code or comments (`(G2-9)`, `(B12)`…); traceability lives in commit messages and git blame.
+- No tutorial narration, no restating the next line, no change history ("不再…", "改成…"), no commented-out code.
+- No run instructions in file headers; harness usage lives only in `backend/dev/run_harnesses.sh`.
+
 ## Requirements vs approval
 - A user posting a LIST of items (e.g. G1-G9) is only raising requirements, NOT approving implementation. Discuss each item's details and get explicit confirmation BEFORE delegating any code. Implementing an unconfirmed list produced wrong work that had to be fully reverted (e051fec).
 - 先寫教學再執行: for any change that introduces a new front-end or back-end concept (bug fixes included), write the teaching guide first (`docs/*.html`, self-contained, same style as `docs/20261020_create-all-guide.html`; filename `YYYYMMDD_(<task id>)<name>-guide.html` with the creation date, e.g. `20261102_(G8)message-actions-guide.html`, omit `(<task id>)` when there is none; structure: concept, why, code, short practice list), commit it as its own `docs:` commit, wait for the user to read it and say 開始, THEN delegate. When a design decision is made or a step lands, update the same guide (decision table + implementation record) in a separate `docs:` commit.
