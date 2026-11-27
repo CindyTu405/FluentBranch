@@ -51,26 +51,27 @@ A sidebar or panel that is a full-screen overlay on mobile and a resizable colum
 - `npm run build` catches syntax errors but not visual results. Say so in the report.
 - Check hover/active by viewport: desktop >= 768 px. Mobile sidebar is a drawer.
 
-### Tooling: Claude in Chrome
-- Tools are `mcp__claude-in-chrome__*` and act in the user's real Chrome (their sign-ins, their extension permissions). Load the core tools in ONE ToolSearch call first (tabs_context_mcp, tabs_create_mcp, navigate, computer, read_page, javascript_tool, read_console_messages; add form_input / find when needed). The `chrome-browser` skill has the details.
-- Always open the app in a NEW tab (`tabs_create_mcp`). Do not drive the user's existing tabs. Close the tab when done.
-- localhost must be allowed in the extension's site permissions. If a call is refused or a permission dialog appears, stop and ask the user.
+### Tooling: built-in browser pane (default for localhost)
+- Tools are `mcp__Claude_Browser__*`, already loaded; the `built-in-browser` skill has the details. The pane has its own cookies, separate from the user's Chrome.
+- Start Vite with `preview_start` name `frontend` (from `.claude/launch.json`, port 5173), not Bash. Read errors with `read_console_messages` / `preview_logs`.
+- Mobile check: `resize_window` preset `mobile` (375x812, also emulates touch and a mobile UA), reload, then measure. Reset with preset `desktop` when done.
+- Claude in Chrome (`mcp__claude-in-chrome__*`) only for the production site or when the user's Chrome sign-in is needed: load its tools in ONE ToolSearch call, open a NEW tab, close it when done; the `chrome-browser` skill has the rest.
+
+### Measuring (either browser)
 - Measure with `javascript_tool` (`getBoundingClientRect()`, `getComputedStyle()`, `scrollWidth > innerWidth`); look with a `computer` screenshot. Check computed styles, not just class lists.
 - Hover/active: move the mouse over the row with `computer`, then screenshot or read computed `background-color`.
-- Drag handles: first try a real drag with `computer` (left_click_drag). If the width does not change, fall back to dispatching events from `javascript_tool`: `pointerdown` on the handle (`bubbles: true, button: 0, pointerType: 'mouse'`), then `pointermove` and `pointerup` on `window`. Confirm by reading the element width and `localStorage` afterwards. (Under the old Hermes harness, CDP mouse events did not trigger `pointermove` listeners on window, so a drag looked broken when it was not. Claude in Chrome may behave differently; trust a measured width, not the screenshot alone.)
-- Mobile layout check (375px): a real Chrome window cannot be shrunk reliably that small, so do not depend on `resize_window`. Instead, in `javascript_tool`, append a same-origin iframe to the page: `position: fixed; top: 0; left: 0; width: 375px; height: 740px; z-index: 99999; background: #fff; border: 0;` with `src = location.origin`. Media queries and `matchMedia('(min-width: 768px)')` inside the iframe evaluate against the iframe width. Measure inside via `iframe.contentDocument` / `iframe.contentWindow` (right edges vs the container's right edge; overflow shows as `scrollWidth > innerWidth`). Remove the iframe afterwards. Limits: no touch emulation, so touch-only behavior still needs a manual check.
-  - Status: written for the Claude Code migration and NOT yet tried. On first use confirm it works; if the iframe is blocked, ask the user to resize the window or use DevTools device mode.
+- Drag handles: first try a real drag with `computer` (left_click_drag). If the width does not change, fall back to dispatching events from `javascript_tool`: `pointerdown` on the handle (`bubbles: true, button: 0, pointerType: 'mouse'`), then `pointermove` and `pointerup` on `window`. Confirm by reading the element width and `localStorage` afterwards. Trust a measured width, not the screenshot alone.
 
 ### Browser verification of a chat behavior
-1. Start the backend harness and the Vite dev server with Bash `run_in_background: true` (no trailing `&`). Backend: from the backend dir, `PYTHONPATH=<scratch dir> .venv/bin/uvicorn <module>:app --port <port>` (harness: see streaming-generation.md). Frontend: from `frontend/`, `npx vite --port 5173 --strictPort`. Health-check each in a separate call with curl (`/docs` → 200, and `http://127.0.0.1:5173` → 200). Vite needs CORS (already allowed for 5173) and `frontend/.env` must point VITE_API_URL at the test backend port. A `chrome-error://` page with ERR_CONNECTION_REFUSED means a dev server is not up; do not read the DOM from it, fix the server first.
-2. Login: the app uses OAuth cookie sessions. If the test backend needs a signed-in user, ask the user to sign in in that tab. Never type credentials. (Unchecked in this setup: whether the harness backend on another port accepts the user's existing session. Find out on the first run.)
+1. Start the backend harness with Bash `run_in_background: true` (no trailing `&`): from the backend dir, `PYTHONPATH=<scratch dir> .venv/bin/uvicorn <module>:app --port <port>` (harness: see streaming-generation.md). Start Vite with `preview_start` name `frontend`. Health-check each in a separate call with curl (`/docs` → 200, and `http://127.0.0.1:5173` → 200). Vite needs CORS (already allowed for 5173) and `frontend/.env` must point VITE_API_URL at the test backend port. A `chrome-error://` page with ERR_CONNECTION_REFUSED means a dev server is not up; do not read the DOM from it, fix the server first.
+2. Login: the app uses OAuth cookie sessions. If the test backend needs a signed-in user, ask the user to sign in in the pane (its cookies are separate from Chrome). Never type credentials. (Unchecked: whether the harness backend on another port accepts that session. Find out on the first run.)
 3. Click New Chat before each scenario. Sending while a conversation is open appends a child to that tree, so no new sidebar row appears and the test reads the wrong thread.
 4. Send by filling the textarea and pressing Enter (`computer` key press, or a `keydown` Enter event from `javascript_tool`). Enter only sends at desktop width (>= 768 px).
 5. Find sidebar rows with `innerText.includes(<unique title>)`, not equality: each row's text also contains the date line.
 6. For "still generating" checks, take two or more readings of a growing marker (e.g. the `[n]` chunk counter) a fraction of a second apart and compare. One snapshot cannot tell "mid-generation" from "finished".
 7. Scope any DB assertion to the test's `session_id`. Global queries pick up rows left by earlier runs, including empty assistant rows from interrupted tests.
 8. Test rows stay in the DB after the run. Name them with a unique prefix and say so in the report.
-9. When finished, stop both servers (stop the background tasks, or `pgrep -af uvicorn` / `pgrep -af vite` then `kill <pid>`) and confirm they are gone.
+9. When finished, stop both servers (`preview_stop` for Vite; stop the uvicorn background task, or `pgrep -af uvicorn` then `kill <pid>`) and confirm they are gone.
 
 ## Teaching docs
 Self-contained HTML in `docs/` (see `docs/20261022_(BugB)css-hover-mask-guide.html` for the sidebar hover/mask case, `docs/20261020_create-all-guide.html` for the house style). The hover and mask demos should be interactive in the browser, not just described.
