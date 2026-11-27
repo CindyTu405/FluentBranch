@@ -5,14 +5,15 @@ Before starting work read `PLAN_v2.md`, `BUGS.md`, `BACKLOG.md`, and for Phase 3
 The `ct-chat-router` skill holds the project map, key code facts and known pitfalls.
 
 ## Tone
-Be direct: match the length of your reply to the weight of the ask. A one-line question gets a one-line answer, and finished work gets a short report of what changed, what's verified, and what's left, never a replay of the process. No filler ("Great question," "I'd be happy to"), no restating the request back, no re-summarizing what you already said, no narrating tool calls the user can see. Plain claims over adjectives; when unsure, say so plainly. Agree because it's right, not because the user said it. Depth is earned: give it when the user asks for detail, teaches, or the stakes demand it, not by default.
+Finished work gets a short report: what changed, what's verified, what's left. Agree because it's right, not because the user said it.
 Reply in the language the user writes in.
 
 ## Who writes code
 - ALL code is written by the `implementer` subagent. The main agent does NOT write code itself, even for hard technical points. The main agent diagnoses, spikes, and writes precise specs; the subagent implements. (The user corrected this once when F7 was hand-written.)
+- Exception: the main agent may edit directly only when ALL hold: one file, <= 5 lines, no logic change (typo, copy text, a class value, a config value). Anything with a new concept or needing a teaching guide goes to `implementer`. Commit format and verification rules still apply.
 - Subagent reports must be terse: one-line summary + commit hash.
-- Commit-message format: subagents often deviate. Write the exact message in the task text and say "EXACTLY", then `git log --oneline -3` to confirm before pushing.
-- Parallel work: subagents share ONE working dir. Before dispatching a batch, grep which files each task touches and run in parallel only tasks with disjoint file sets. Same-file tasks are serialized or folded into one subagent making two separate commits. If `git commit` fails on `index.lock`, retry once after 2 s.
+- Commit-message format: write the exact message in the task text and say "EXACTLY", then `git log --oneline -3` to confirm before pushing.
+- Parallel work: give each parallel subagent `isolation: "worktree"` so it commits on its own branch. A worktree starts from HEAD (commit first) and lacks the gitignored `frontend/node_modules`, `backend/.venv` and `.env` files: tell the subagent to symlink them from the main checkout before building. Merge the branches into main one at a time, then re-run the acceptance commands on main. A single subagent works in the main checkout.
 
 ## Code comments
 - Comment only what the code cannot say: a non-obvious why, an invariant, an ordering requirement, a security constraint. One line where possible.
@@ -29,7 +30,7 @@ Reply in the language the user writes in.
 - Write each task's acceptance criteria as RUNNABLE commands ("run X → prints Y"). On completion re-run them yourself, plus `git log` / `git status`, and read the changed code, before marking done and pushing. A subagent's "completed" is an unverified claim.
 - Before editing for a user request, run `git status` and `git log --oneline -5`: the user sometimes commits the same change between turns.
 - Verify UI changes by viewport width (desktop >= 768, mobile < 768). When a change splits mobile and desktop behavior, re-test the desktop features of the same element too (drag handle position and result, column widths, footer position).
-- Browser checks use Claude in Chrome. Procedure: `.claude/skills/ct-chat-router/references/frontend-ui-patterns.md`, section Verification.
+- Browser checks of the local app use the built-in browser pane (`preview_start` with name `frontend`); use Claude in Chrome only for the production site or when the user's Chrome sign-in is needed. Procedure: `.claude/skills/ct-chat-router/references/frontend-ui-patterns.md`, section Verification.
 - Frontend-only edits: `cd frontend && npm run build` is the quick gate (no UI test suite). Say explicitly in the report that visual behavior was not browser-verified when it wasn't.
 - Backend streaming: verify with a fake-LLM harness on a real uvicorn server, never real Gemini/OpenRouter calls (they cost money). Ask the user to run the real-model check.
 - Before any scripted file edit check line endings (`grep -c $'\r' <file>`). As of 2026-10-28 `backend/main.py` and `backend/models.py` are LF; frontend files are LF. Write back with the file's own ending.
@@ -60,5 +61,5 @@ When a floating control (⋯, buttons) covers text, fade the text with a `mask-i
 - G2 needs `CREDENTIAL_ENCRYPTION_KEY` in the VM's `.env` (generate once with `python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`; never commit it; losing or changing it invalidates every OpenRouter link, users just reconnect), and the G2 migration (`sudo docker compose exec api alembic upgrade head`) after the pull.
 
 ## Context hygiene
-Durable state lives in the skill, the PLAN docs and git. Suggest a fresh session (`/clear`) once a conversation gets very long.
+Durable state lives in the skill, the PLAN docs and git. Long conversations are summarized automatically; suggest a new session when the topic changes, not because of length.
 Past planning from the earlier OpenCode sessions is in `~/.local/share/opencode/opencode.db` (SQLite; `session_v2` / `session_message`).

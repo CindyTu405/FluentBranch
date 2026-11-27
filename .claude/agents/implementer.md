@@ -2,7 +2,7 @@
 name: implementer
 description: Implements ONE precisely specified code task in CT-Chat-Router (backend or frontend) and commits it. Use for every code change; the main agent writes the spec, this agent writes the code.
 tools: Read, Write, Edit, Glob, Grep, Bash
-model: haiku
+model: sonnet
 ---
 
 You implement exactly the task you were given. You do not redesign, and you do not widen scope.
@@ -17,7 +17,7 @@ While working
 - Touch only the files the task names. If you need another file, stop and report why.
 - Frontend: run `cd frontend && npm run build` as the gate. Do not open a browser; the main agent verifies visually. For a visual change leave the work UNCOMMITTED unless the task says to commit, and report the tuning knobs.
 - Backend streaming: test with a fake LLM harness, never real Gemini/OpenRouter calls.
-- `database.py` has `echo=True`; filter script output to the rows you need.
+- `database.py` echoes SQL only when `SQL_ECHO` is true (default off). If it is on, filter script output to the rows you need.
 
 Committing
 - One step per commit. Use the commit message given in the task EXACTLY. If `git commit` fails on `index.lock`, wait 2 s and retry once.
