@@ -156,23 +156,35 @@ $ git worktree list
 
   <section class="card">
     <h2><span class="num">3</span>它在這個專案是怎麼來的</h2>
-    <p><code>.claude/worktrees/</code> 是 <b>Claude Code 開 worktree 時的預設位置</b>。2026-11-05 做 S-U1（使用者資料歸屬）時，有一個 session 是用「在自己的 worktree 裡工作」的方式開的：它從 <code>main</code> 建了 <code>feat/s-u1-9</code>，在 <code>s-u1</code> 資料夾裡做 S-U1-9。</p>
-    <pre><code>$ git reflog show feat/s-u1-9
-feed2bb  commit: docs: (S-U1-9) record status and drop migrate.py from READMEs
-fc3e92d  commit: feat: (S-U1-9) require owners and drop session_id
-9657753  branch: Created from main          <span class="cm"># ← 起點</span></code></pre>
-    <p>為什麼要這樣做？因為當時主資料夾可能還有其他工作在進行。開 worktree 的話，S-U1-9 的修改就<b>不會跟主資料夾的檔案互相覆蓋</b>。CLAUDE.md 規定「同一個工作資料夾裡不能讓兩個 agent 改同一批檔案」，worktree 就是讓它們分開的辦法。</p>
+    <h3>位置是誰決定的</h3>
+    <p>worktree 是 git 本身的功能，<b>git 不限制它放在哪裡</b>：<code>git worktree add &lt;路徑&gt;</code> 的路徑隨你指定，git 只在 <code>.git/worktrees/&lt;名字&gt;/</code> 登記它。手動開的話，常見做法是放在 repo 旁邊（例如 <code>../ai-chat-backend-xxx</code>），這樣就不會變成「repo 裡又包了一個 repo」。</p>
+    <p><code>.claude/worktrees/&lt;名字&gt;/</code> 這個位置符合 Claude Code 開 worktree 的慣例，所以 <code>s-u1</code> 很可能是某個 Claude Code session 開的。不過沒有任何紀錄能證明是誰建的，這一點是推測。</p>
+
+    <h3>它經歷了什麼（從 git 歷史還原）</h3>
+    <p><code>PLAN_v2.md</code> 的 S-U1 規格寫著：在 <code>feat/s-u1-user-ownership</code> 開發，<b>其他 session 共用此資料夾時改用 worktree</b>。目的是讓兩邊的修改不會互相覆蓋同一批檔案。</p>
+    <div class="tablewrap"><table>
+      <tr><th>時間</th><th>發生什麼事</th><th>依據</th></tr>
+      <tr><td>11/05 16:35</td><td><code>s-u1</code> 資料夾建立</td><td>資料夾內檔案的建立時間</td></tr>
+      <tr><td>11/05 16:38–19:18</td><td>S-U1-1～7 在 <code>feat/s-u1-user-ownership</code> 上完成</td><td>commit 時間</td></tr>
+      <tr><td>11/05 20:14</td><td><code>feat/s-u1-user-ownership</code> merge 進 main</td><td>main 的 reflog</td></tr>
+      <tr><td>11/05 23:13 之後</td><td>從 main 的 <code>9657753</code> 建出 <code>feat/s-u1-9</code>，<code>s-u1</code> 換到這條分支</td><td><code>git reflog show feat/s-u1-9</code>：<code>Created from main</code></td></tr>
+      <tr><td>11/06 11:12–11:14</td><td>在 <code>s-u1</code> 裡 commit 兩次（S-U1-9）</td><td>commit 時間</td></tr>
+      <tr><td>11/06 11:31</td><td><code>feat/s-u1-9</code> merge 進 main</td><td>main 的 reflog</td></tr>
+    </table></div>
+    <p class="muted">資料夾比 <code>feat/s-u1-9</code> 早出現了大半天，所以它一開始應該是給 <code>feat/s-u1-user-ownership</code> 用的，後來同一個資料夾換了分支繼續用。這是從時間推出來的；worktree 的 HEAD 紀錄已隨 <code>git worktree remove</code> 刪除，無法再直接查證。</p>
 
     <div class="flow">
-      <div class="box">11/05<br>建 worktree s-u1<br>＋分支 feat/s-u1-9</div>
+      <div class="box">11/05<br>建 worktree s-u1</div>
       <div class="arrow">→</div>
-      <div class="box">在 s-u1 裡<br>commit 兩次</div>
+      <div class="box">換到<br>feat/s-u1-9</div>
+      <div class="arrow">→</div>
+      <div class="box">11/06<br>commit 兩次</div>
       <div class="arrow">→</div>
       <div class="box">merge 進 main</div>
       <div class="arrow">→</div>
-      <div class="box" style="background:#fffbeb;border-color:#fcd34d;color:#92400e">到今天<br>資料夾還沒清</div>
+      <div class="box" style="background:#fffbeb;border-color:#fcd34d;color:#92400e">之後<br>資料夾一直沒清</div>
     </div>
-    <p class="muted">已確認：<code>git log main..feat/s-u1-9</code> 是空的，代表全部都已經進了 main；worktree 裡也沒有未提交的修改。</p>
+    <p class="muted">刪除前已確認：<code>git log main..feat/s-u1-9</code> 是空的，代表全部都已經進了 main；worktree 裡也沒有未提交的修改。</p>
   </section>
 
   <section class="card">
@@ -236,7 +248,7 @@ gitdir: .../ai-chat-backend/.git/worktrees/s-u1</code></pre>
       </tr>
     </table></div>
 
-    <div class="warn"><b>最重要的一點：資料庫只有一個。</b>s-u1 的 <code>.env</code> 是 symlink，<code>DATABASE_URL</code> 跟主資料夾一模一樣，都連到 docker 的 <code>chat_db</code>（port 5432）。所以在 worktree 裡跑 <code>alembic upgrade head</code>，改的就是<b>主資料夾正在用的同一個資料庫</b>。S-U1-9 刪掉了 <code>session_id</code> 欄位，只要在 s-u1 套用那個 migration，main 那邊的資料庫也就跟著沒有這個欄位了。檔案可以隔離，資料庫不行。</div>
+    <div class="warn"><b>最重要的一點：資料庫只有一個。</b>s-u1 的 <code>.env</code> 是 symlink，讀到的設定跟主資料夾一模一樣。<code>backend/database.py</code> 沒有 <code>DATABASE_URL</code> 環境變數時，會用 <code>.env</code> 的 <code>POSTGRES_*</code> 組出 <code>localhost:5432</code>，也就是 docker 的 <code>chat_db</code>。所以在 worktree 裡跑 <code>alembic upgrade head</code>，改的就是<b>主資料夾正在用的同一個資料庫</b>。S-U1-9 刪掉了 <code>session_id</code> 欄位，只要在 s-u1 套用那個 migration，main 那邊的資料庫也就跟著沒有這個欄位了。檔案可以隔離，資料庫不行。</div>
 
     <div class="tip"><b>docker 也一樣：</b><code>docker-compose.yml</code> 寫死了 <code>container_name: chat_db</code>、<code>chat_api</code>。在 worktree 裡再跑一次 <code>docker compose up</code> 會因為名字已被佔用而失敗。後端、資料庫請一律從主資料夾啟動；worktree 只拿來改檔案和跑不碰資料庫的檢查（例如 <code>npm run build</code>）。</div>
   </section>
