@@ -1,4 +1,4 @@
-// 第 7–8 條：分支面板重新生成、編輯最後一則 user 訊息（API 全部由 mockApi 假造）
+// 分支面板重新生成、編輯最後一則 user 訊息（API 全部由 mockApi 假造）
 import { test, expect } from '@playwright/test';
 import {
   mockApi,

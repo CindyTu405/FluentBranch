@@ -1,4 +1,4 @@
-"""(G2-8) 使用者連結自己的 OpenRouter 帳號：OAuth PKCE 流程，金鑰加密後存進 openrouter_credential。
+"""使用者連結自己的 OpenRouter 帳號：OAuth PKCE 流程，金鑰加密後存進 openrouter_credential。
 
 路由（掛在 /auth/openrouter，必須比 auth_routes 先 include，否則 /{provider}/callback 會先匹配）：
     GET    /auth/openrouter/connect    -> 產生 code_verifier／state，存進 Starlette session，303 去 OpenRouter 授權頁
@@ -51,8 +51,6 @@ PKCE_SESSION_KEY = "openrouter_pkce"
 
 NO_STORE = {"Cache-Control": "no-store"}
 
-
-# ===== 小工具 =====
 
 def _now_unix() -> int:
     """目前的 unix 秒數（獨立成函式，harness 可換掉來測過期）。"""
@@ -111,8 +109,6 @@ async def exchange_code_for_key(code: str, code_verifier: str) -> str | None:
         return None
     return key
 
-
-# ===== 路由 =====
 
 @router.get("/connect", name="openrouter_connect")
 @limiter.limit("10/minute")

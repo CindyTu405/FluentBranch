@@ -1,27 +1,4 @@
-"""
-[步驟 T1] 開發用測試資料腳本（不屬於產品功能）
-
-直接透過 DATABASE_URL 寫入資料庫，不經過 API，用来產生跨越多個日期的
-[SEED] 對話，供時間軸分組（P5a）與時間軸導航列（P5b）驗收使用。
-
-用法：
-    # 一般從 repo 根目錄或 backend/ 目錄執行皆可
-    python backend/dev/seed_chats.py --provider github --email you@example.com
-
-    # 使用者以 (provider, email) 尋找；找不到就用 upsert_user 建立一個
-    # （oauth_sub 為 "seed-<provider>-<email>"，只供本機開發資料使用）。
-
-    # 清除所有 [SEED] 開頭的測試資料（不分使用者）
-    python backend/dev/seed_chats.py --cleanup
-
-說明：
-- 所有标题与内容都带 `[SEED]` 前缀，--cleanup 只会删除这些资料，
-  其他对话不受影响。
-- 重新 seed 前会先清掉旧的 [SEED] 资料，避免重复执行累积脏数据。
-- created_at 一律写入 naive UTC（与 models.py 的约定一致：
-  TIMESTAMP 栏位存 UTC，aware datetime 会被 psycopg2 依 DB 时区转换而错位）。
-- 每笔时间固定在 UTC 12:00 前后，避免 UTC+8 等时区下分组错位。
-"""
+"""寫入跨多個日期的開發用測試對話（CLI，直接寫 DB，不經 API）。"""
 
 import argparse
 import calendar
@@ -42,12 +19,10 @@ from database import DATABASE_URL  # noqa: E402
 
 SEED_PREFIX = "[SEED]"
 
-# 表格名：SQLModel 预设为小写类名 "message"
+# 表格名：SQLModel 預設為小寫類名 "message"
 TABLE = Message.__tablename__
 
-# ---------------------------------------------------------------------------
 # 测试资料规格
-# ---------------------------------------------------------------------------
 # 每项：(标题, 使用者问题, 助手回复, root 几天/几周前, 回复几天前(None=跟 root 同时段))
 # - 前 7 笔涵盖计划要求的日期：今天、昨天、3 天前、10 天前、20 天前、2 个月前、1 年前
 # - 后 2 笔是「迟回覆」情境（建立很久、最近才有 assistant 回复），
@@ -80,9 +55,7 @@ def _chat_specs() -> list[tuple[str, str, str, dict, dict | None]]:
     ]
 
 
-# ---------------------------------------------------------------------------
 # 时间工具
-# ---------------------------------------------------------------------------
 def _shift_months(dt: datetime, months: int) -> datetime:
     """往回（months>0 表示几个月前）移动月份，处理月底日期溢出（如 3/31 → 2/28）。"""
     idx = dt.year * 12 + (dt.month - 1) - months
@@ -119,9 +92,7 @@ def _offset_to_dt(spec: dict, minute: int = 0) -> datetime:
     return dt.replace(minute=minute)
 
 
-# ---------------------------------------------------------------------------
 # 写入 / 清除
-# ---------------------------------------------------------------------------
 def get_or_create_user(engine, provider: str, email: str) -> uuid.UUID:
     """依 (oauth_provider, email) 找使用者；找不到就用 upsert_user 建立（開發用）。"""
     with Session(engine) as session:
@@ -228,9 +199,7 @@ def cleanup(engine) -> None:
               "可能存在非 [SEED] 的子节点，请手动检查。")
 
 
-# ---------------------------------------------------------------------------
 # 入口
-# ---------------------------------------------------------------------------
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="[T1] 开发用测试资料脚本：写入/清除 [SEED] 开头的跨日期对话",

@@ -1,19 +1,4 @@
-"""(B12) 連線池壓力測試：多人同時生成時，無關用戶的請求與串流不能被卡住。
-
-用法（只用臨時資料庫，不要指向正式 chat_db）：
-    cd backend && POSTGRES_DB=v1_models SQL_ECHO=false uv run python dev/pool_harness.py 2>&1 | grep -v sqlalchemy | tail -5
-
-做的事：
-- 把 main.gemini_chat_stream 換成假串流：先吐一段、sleep 約 6 秒、再吐一段（絕不呼叫真模型）。
-- 三個階段，各 30 / 30 / 20 個併發：
-  1. 30 人各開一個 /chat 生成
-  2. 30 個 GET /messages/{id}/stream 續讀端，讀的是進行中的生成
-  3. 20 個 regenerate
-  每個階段：生成開始 2 秒後，無關用戶的 GET /auth/me 必須 2 秒內回 200；
-  所有串流都回 200 且內容完整；DB 裡的 AI 訊息內容等於完整文字。
-- 伺服器 log 不能出現 QueuePool。
-- 只清理本腳本建立的 user（訊息、daily_usage、auth_session 一併清）。
-"""
+"""連線池壓力測試：多人同時生成時，無關用戶的請求與串流不被卡住。"""
 import asyncio
 import logging
 import os
@@ -53,7 +38,6 @@ main.BUFFER_RETENTION_SECONDS = 2
 main.get_free_models = lambda session, force_refresh=False: []
 main.limiter.enabled = False
 
-# ---------- 假串流 ----------
 
 def head_of(message: str) -> str:
     return f"[{message}] first half. "
@@ -76,7 +60,6 @@ async def fake_stream(message, history, model):
 main.gemini_chat_stream = fake_stream
 main.openrouter_chat_stream = fake_stream
 
-# ---------- log 擷取 ----------
 
 class _Capture(logging.Handler):
     def __init__(self):
@@ -96,7 +79,6 @@ class _Capture(logging.Handler):
 CAPTURE = _Capture()
 CAPTURE.setFormatter(logging.Formatter("%(name)s %(levelname)s %(message)s"))
 
-# ---------- 結果 ----------
 
 RESULTS: list[tuple[str, bool, str]] = []
 CREATED: list[uuid.UUID] = []
@@ -110,7 +92,6 @@ def check(name: str, cond: bool, detail: str = ""):
         print(f"FAIL {name}: {detail}")
 
 
-# ---------- 小工具 ----------
 
 def make_user() -> tuple[uuid.UUID, str]:
     with Session(engine) as s:
@@ -165,7 +146,6 @@ def join_all(threads, timeout: float = 90):
         t.join(max(0.0, deadline - time.time()))
 
 
-# ---------- 階段 ----------
 
 def run_generation_client(token: str, message: str, slot: dict, idx: int, started: threading.Event | None = None):
     """POST /chat（或 regenerate）並讀完整個串流，結果寫進 slot[idx]。"""
@@ -307,7 +287,6 @@ def phase_regenerate(tag: str) -> None:
     summarize_and_check(tag, n, slot, expected, users)
 
 
-# ---------- 伺服器與清理 ----------
 
 def start_server() -> uvicorn.Server:
     config = uvicorn.Config(main.app, host="127.0.0.1", port=PORT, log_level="warning", log_config=None)

@@ -1,9 +1,6 @@
 // 共用的時間格式化工具
 //
-// 後端一律回傳「UTC 且結尾帶 Z」的 ISO 字串 (例如 2026-10-09T08:56:25.138679Z)。
-// 舊寫法是 targetTime + (targetTime.endsWith("Z") ? "" : "Z")，
-// 一旦後端回傳帶 offset 的字串 (例如 ...+08:00) 就會变成 "...+08:00Z" → Invalid Date。
-// 這裡改成用正規表示式判斷，只要字串本身沒有時區資訊才補 Z，比較安全。
+// 後端回傳 UTC 且結尾帶 Z 的 ISO 字串；字串已帶時區（Z 或 ±hh:mm）時不補 Z，避免 Invalid Date。
 
 const HAS_TIMEZONE = /(Z|[+-]\d{2}:?\d{2})$/;
 
@@ -22,7 +19,7 @@ export function parseUTCDate(value) {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
-// 用瀏覽器自己的時區顯示 (不再寫死 Asia/Taipei)
+// 用瀏覽器自己的時區顯示
 const LOCAL_TIME_ZONE = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
 /**
@@ -64,7 +61,7 @@ export function formatShortDateTime(value) {
 // 側邊欄時間軸分組
 // ---------------------------------------------------------------------------
 
-// 取得「當地時間零點」，用來算日历天數差；用 round 吸收夏令時間造成的 1 小時誤差。
+// 取得「當地時間零點」，用來算日曆天數差；用 round 吸收夏令時間造成的 1 小時誤差。
 function startOfLocalDay(date) {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate());
 }

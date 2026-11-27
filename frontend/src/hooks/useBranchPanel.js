@@ -1,22 +1,22 @@
-// (R-5) 從 App.jsx 搬出：右側分支面板（開啟的分支 tab、各分支訊息與輸入框）與目前對話的分支清單（錨點高亮）。不依賴主對話的 messages：建立分支時由呼叫端傳入 rootId
+// 右側分支面板狀態（開啟的分支 tab、各分支訊息與輸入框）與目前對話的分支清單（錨點高亮）。不依賴主對話 messages，建立分支時由呼叫端傳入 rootId。
 import { useState, useCallback } from 'react';
 import { apiFetch } from '../api';
 import { readTextStream } from '../readTextStream';
 import { QuotaError, throwIfQuotaError, MAX_MESSAGE_CHARS, MAX_ANCHOR_TEXT_CHARS, TOO_LONG_MSG } from '../quotaErrors';
 
 export function useBranchPanel({ model, user, fetchHistory, refreshAfterGeneration }) {
-  // ★★★ (P2-5) 右側分支面板 ★★★
+  // 右側分支面板
   // 每條分支各自持有訊息串與輸入框，彼此獨立，不影響主視窗的 messages
   // 形狀：{ id, anchorMessageId, rootMessageId, title, messages, input, isLoading }
   const [branches, setBranches] = useState([]);
   const [activeBranchId, setActiveBranchId] = useState(null);
   const [branchPanelOpen, setBranchPanelOpen] = useState(false);
 
-  // ★★★ (P2-12) 持久化錨點高亮：目前對話的所有分支（GET /chats/{root_id}/branches）★★★
+  // 持久化錨點高亮：目前對話的所有分支（GET /chats/{root_id}/branches）
   // 只放後端回來的原始資料，畫面靠 anchor_message_id + anchor_text 在訊息裡畫重點
   const [branchList, setBranchList] = useState([]);
 
-  // (P2-12) 取得這棵對話樹的所有分支，供錨點文字持久高亮使用
+  // 取得這棵對話樹的所有分支，供錨點文字持久高亮使用
   const loadBranchList = useCallback(async (rootId) => {
     if (!rootId) {
       setBranchList([]);
@@ -33,7 +33,7 @@ export function useBranchPanel({ model, user, fetchHistory, refreshAfterGenerati
     }
   }, []);
 
-  // ★★★ (P2-5) 分支面板：狀態操作小工具 ★★★
+  // 分支面板：狀態操作小工具
   const updateBranch = useCallback((branchId, updater) => {
     setBranches(prev => prev.map(b => (b.id === branchId ? updater(b) : b)));
   }, []);
@@ -59,7 +59,7 @@ export function useBranchPanel({ model, user, fetchHistory, refreshAfterGenerati
     }
   }, []);
 
-  // ★★★ (P2-12) 點擊錨點高亮 → 在右側面板開啟對應分支 ★★★
+  // 點擊錨點高亮 → 在右側面板開啟對應分支
   // 已經開著就只切換，不重複開 tab
   const openBranchFromHighlight = (branch) => {
     if (!branch) return;
@@ -92,10 +92,10 @@ export function useBranchPanel({ model, user, fetchHistory, refreshAfterGenerati
     }
   };
 
-  // ★★★ (P2-4) 選取 AI 回覆文字 → 建立分支 ★★★
-  // (P2-5) 成功後在右側面板開一個新 tab，並載入該分支的訊息
+  // 選取 AI 回覆文字 → 建立分支
+  // 成功後在右側面板開一個新 tab，並載入該分支的訊息
   const handleCreateBranch = async (rootId, anchorMessageId, selectedText, anchorStart = null, anchorEnd = null) => {
-    // rootId：目前時間線的第一則訊息 id，由呼叫端（App）傳入（R-5 起分支 Hook 不讀 messages）。
+    // rootId：目前時間線的第一則訊息 id，由呼叫端（App）傳入。
     // 剛開始的新對話還沒重新載入歷史，messages[0] 還沒有真正的 id，就沒得建立分支。
     if (!rootId) {
       alert("請先重新載入對話再建立分支");
@@ -123,7 +123,7 @@ export function useBranchPanel({ model, user, fetchHistory, refreshAfterGenerati
       const data = await res.json();
 
       if (data.reused) {
-        // (E3) 同範圍已有分支：不建新 tab，直接開既有的那一條
+        // 同範圍已有分支：不建新 tab，直接開既有的那一條
         const existing = (branchList || []).find((b) => String(b.id) === String(data.branch_id)) || {
           id: data.branch_id,
           anchor_message_id: data.anchor_message_id,
@@ -136,7 +136,7 @@ export function useBranchPanel({ model, user, fetchHistory, refreshAfterGenerati
         // tab 標題：後端回傳的 title（與 inline 高亮、底部入口同一份）
         const title = data.title || "新分支";
 
-        // (P2-10) 分支還不會有任何訊息：選取文字只放進輸入框，等使用者自己送出
+        // 分支還不會有任何訊息：選取文字只放進輸入框，等使用者自己送出
         setBranches(prev => (
           prev.some(b => b.id === data.branch_id)
             ? prev
@@ -154,7 +154,7 @@ export function useBranchPanel({ model, user, fetchHistory, refreshAfterGenerati
         setBranchPanelOpen(true);
       }
 
-      // (P2-12) 重新抓分支清單，讓剛建立的錨點文字立刻變成可點擊的高亮
+      // 重新抓分支清單，讓剛建立的錨點文字立刻變成可點擊的高亮
       loadBranchList(rootId);
 
       // 更新側邊欄，讓樹狀圖標誌 (has_branch) 出現
@@ -165,13 +165,13 @@ export function useBranchPanel({ model, user, fetchHistory, refreshAfterGenerati
     }
   };
 
-  // (P2-5) 在某條分支裡送訊息：parent_id = 該分支最後一則訊息，branch_id = 該分支
-  // (P2-10) 分支還沒有任何訊息時，第一則要是 anchor 的子節點
+  // 在某條分支裡送訊息：parent_id = 該分支最後一則訊息，branch_id = 該分支
+  // 分支還沒有任何訊息時，第一則要是 anchor 的子節點
   const sendBranchMessage = async (branchId) => {
     const branch = branches.find(b => b.id === branchId);
     if (!branch || !branch.input.trim() || branch.isLoading || !model) return;
 
-    if (branch.input.length > MAX_MESSAGE_CHARS) { alert(TOO_LONG_MSG); return; } // (B13)
+    if (branch.input.length > MAX_MESSAGE_CHARS) { alert(TOO_LONG_MSG); return; }
     const content = branch.input;
     const parentId = branch.messages.length > 0
       ? branch.messages[branch.messages.length - 1].id
@@ -205,7 +205,7 @@ export function useBranchPanel({ model, user, fetchHistory, refreshAfterGenerati
       if (!response.ok) throw new Error("API Error");
 
       const newMsgId = response.headers.get("X-Message-Id");
-      // (F9-B4) 補回樂觀 user 訊息的 id：倒數第二則是沒有 id 的 user、最後一則是 assistant 時才補
+      // 補回樂觀 user 訊息的 id：倒數第二則是沒有 id 的 user、最後一則是 assistant 時才補
       const newUserMsgId = response.headers.get("X-User-Message-Id");
       if (newUserMsgId) {
         updateBranch(branchId, b => {
@@ -238,7 +238,7 @@ export function useBranchPanel({ model, user, fetchHistory, refreshAfterGenerati
       });
     } catch (error) {
       if (error instanceof QuotaError) {
-        // (V1-2) 額度／速率限制：後端沒寫入，撤掉這次樂觀加入的 user + 空 AI 佔位，文字放回分支輸入框
+        // 額度／速率限制：後端沒寫入，撤掉這次樂觀加入的 user + 空 AI 佔位，文字放回分支輸入框
         updateBranch(branchId, b => {
           const msgs = b.messages;
           const n = msgs.length;
@@ -264,25 +264,25 @@ export function useBranchPanel({ model, user, fetchHistory, refreshAfterGenerati
     } finally {
       updateBranch(branchId, b => ({ ...b, isLoading: false }));
       // 串流結束後回抓歷史，補上伺服器端的訊息 id（下一則的 parent_id 才會正確）
-      // (P2-10) 全新的分支 rootMessageId 還是 null，打 /chats/null/history 只會失敗，直接跳過
+      // 全新的分支 rootMessageId 還是 null，打 /chats/null/history 只會失敗，直接跳過
       if (branch.rootMessageId) {
         loadBranchMessages(branchId, branch.rootMessageId);
       }
-      refreshAfterGeneration(); // (G2-10)
+      refreshAfterGeneration();
     }
   };
 
-  // (G6-2) 分支面板裡重新生成一則 AI 回覆：比照 sendBranchMessage（無 abort controller），串流寫回同一個 message id
-  // 注意：這裡不處理幽靈分支的 tab 關閉與高亮重抓（規格未要求）
-  // (F9-2) 第三參數 { userMsg, content }：同 handleRetry，編輯分支最後一則 user（樂觀更新、被拒時還原）
+  // 分支面板裡重新生成一則 AI 回覆：比照 sendBranchMessage（無 abort controller），串流寫回同一個 message id
+  // 注意：這裡不處理幽靈分支的 tab 關閉與高亮重抓
+  // 第三參數 { userMsg, content }：同 handleRetry，編輯分支最後一則 user（樂觀更新、被拒時還原）
   const retryBranchMessage = async (branchId, msg, { userMsg, content } = {}) => {
     const branch = branches.find(b => b.id === branchId);
     if (!branch || branch.isLoading || !msg?.id || !model) return;
-    if (content != null && content.length > MAX_MESSAGE_CHARS) { alert(TOO_LONG_MSG); return; } // (B13)
+    if (content != null && content.length > MAX_MESSAGE_CHARS) { alert(TOO_LONG_MSG); return; }
     const retryId = msg.id;
     const editing = content != null && !!userMsg;
-    const oldUser = userMsg?.content; // (F9-2) 先記下舊內容，必須在任何 setState 之前
-    // (V1-2) 額度拒絕時還原這則回覆的舊內容與舊模型，同樣必須在 setState 之前記下
+    const oldUser = userMsg?.content; // 先記下舊內容，必須在任何 setState 之前
+    // 額度拒絕時還原這則回覆的舊內容與舊模型，同樣必須在 setState 之前記下
     const oldContent = msg.content;
     const oldModel = msg.model_used;
 
@@ -296,7 +296,7 @@ export function useBranchPanel({ model, user, fetchHistory, refreshAfterGenerati
       }),
     }));
 
-    // (F9-2) 伺服器是否已接受（response.ok）；還沒接受前失敗 → user 還原
+    // 伺服器是否已接受（response.ok）；還沒接受前失敗 → user 還原
     let accepted = false;
     try {
       const response = await apiFetch(`/messages/${retryId}/regenerate`, {
@@ -317,7 +317,7 @@ export function useBranchPanel({ model, user, fetchHistory, refreshAfterGenerati
         })),
       });
     } catch (error) {
-      // (F9-2) 請求被拒或沒送出：user 還原舊內容
+      // 請求被拒或沒送出：user 還原舊內容
       if (editing && !accepted) {
         updateBranch(branchId, b => ({
           ...b,
@@ -325,7 +325,7 @@ export function useBranchPanel({ model, user, fetchHistory, refreshAfterGenerati
         }));
       }
       if (error instanceof QuotaError) {
-        // (V1-2) 額度／速率限制：後端沒寫入，把這則回覆還原成送出前的內容與模型（user 已由上面 F9 還原）
+        // 額度／速率限制：後端沒寫入，把這則回覆還原成送出前的內容與模型
         updateBranch(branchId, b => ({
           ...b,
           messages: b.messages.map(m => (
@@ -344,19 +344,19 @@ export function useBranchPanel({ model, user, fetchHistory, refreshAfterGenerati
       }));
     } finally {
       updateBranch(branchId, b => ({ ...b, isLoading: false }));
-      refreshAfterGeneration(); // (G2-10)
+      refreshAfterGeneration();
     }
   };
 
-  // (G6-2) 幽靈化的分支關閉：從清單移除；若正是目前選中的分支就清成 null（retry 成功後由 handleRetry 呼叫）
+  // 幽靈化的分支關閉：從清單移除；若正是目前選中的分支就清成 null（retry 成功後由 handleRetry 呼叫）
   const closeBranches = (ids) => {
-    // (G6-2) 用functional update 過濾，避免覆蓋串流期間其他分支狀態的變動（不用點擊當下的快照）
+    // 用functional update 過濾，避免覆蓋串流期間其他分支狀態的變動（不用點擊當下的快照）
     setBranches(prev => prev.filter(b => !ids.includes(b.id)));
     // 被關掉的若正是目前選中的分支，就清成 null（面板顯示「尚未開啟分支」，使用者再點選其他 tab）
     setActiveBranchId(a => (ids.includes(a) ? null : a));
   };
 
-  // (R-5) 刪除目前對話時重置分支面板（handleDeleteChat 呼叫）
+  // 刪除目前對話時重置分支面板（handleDeleteChat 呼叫）
   const resetBranches = () => {
     setBranchPanelOpen(false);
     setActiveBranchId(null);

@@ -1,4 +1,4 @@
-// 第 3–6 條：額度被擋、重新生成、分支送訊息、回覆未到就切換對話（API 全部由 mockApi 假造）
+// 額度被擋、重新生成、分支送訊息、回覆未到就切換對話（API 全部由 mockApi 假造）
 import { test, expect } from '@playwright/test';
 import {
   mockApi,
@@ -84,7 +84,7 @@ test('在分支面板送訊息', async ({ page }) => {
   await page.goto('/');
   await sidebarChat(page, '甲對話').click();
 
-  // 點 AI 回覆裡的錨點高亮（inline mark）。底部入口只給 precise === false 的分支，這條分支沒有，所以用 inline
+  // 用 AI 回覆內的錨點 mark 開分支（底部入口只給 precise === false）
   await messageList(page).getByTitle('開啟分支：重點片語').click();
 
   // 分支尚無訊息：輸入框已帶入錨點文字

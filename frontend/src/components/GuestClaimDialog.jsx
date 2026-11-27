@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { apiFetch } from '../api';
 
-// (G2-7) 訪客對話搬移對話框：登入後若有試用時建立的對話，讓使用者選擇「移到帳號」或「刪除」。
+// 訪客對話搬移對話框：登入後若有試用時建立的對話，讓使用者選擇「移到帳號」或「刪除」。
 // 不能用點背景或 Escape 關閉，一定要做出選擇。
 // 請求只帶 action，不帶任何對話 id（後端依瀏覽器持有的訪客 token 判斷要搬哪些資料）。
 export default function GuestClaimDialog({ chatCount, onDone }) {
@@ -23,7 +23,7 @@ export default function GuestClaimDialog({ chatCount, onDone }) {
       // 409 no_pending_claim 代表已經沒有待處理的搬移，視同完成
       if (res.ok || res.status === 409) {
         await onDone();
-        // 成功後父層會卸載此對話框，這裡直接返回，不再設定狀態
+        // 成功後父層會卸載此對話框，不需再設定狀態
         return;
       }
       setError('處理失敗，請再試一次。');

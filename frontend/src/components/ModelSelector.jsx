@@ -1,11 +1,9 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, Sparkles } from 'lucide-react';
 
-// 模型下拉選單（含自訂輸入模式）
-// P4：原生 <select> 改為自訂下拉選單，面板以觸發按鈕右下角為錨點（top:100%; right:0）展開，
-// 下方空間不足時自動向上翻轉；保留原本 optgroup 分群組、自訂輸入模式與 onChange 行為。
+// 模型下拉選單（含自訂輸入模式）。面板以觸發按鈕右下角為錨點，下方空間不足時向上翻轉。
 // 狀態 model / isCustomModel 由 App 管理，本元件只負責渲染與切換。
-// (V1-3) presets / defaultModel 由後端 GET /api/model-options 提供（見 App）：
+// presets / defaultModel 由後端 GET /api/model-options 提供（見 App）：
 //   presets 以 value 開頭為 gemini 者放「Google (原生 API)」，其餘放「預設」；空群組不顯示。
 
 const NO_PRESETS = []; // 固定參考，避免預設值每次 render 都變動
@@ -19,7 +17,7 @@ function ModelSelector({
   freeModelsLoading,
   presets = NO_PRESETS,
   defaultModel = null,
-  allowCustom = false, // (G2-6) false 時不顯示「自訂輸入」群組（訪客或後端未開放）
+  allowCustom = false, // false 時不顯示「自訂輸入」群組（訪客或後端未開放）
 }) {
   const [open, setOpen] = useState(false);
   const [dropUp, setDropUp] = useState(false); // 下方空間不足時向上展開
@@ -45,7 +43,7 @@ function ModelSelector({
       ...(googlePresets.length ? [{ label: 'Google (原生 API)', options: googlePresets }] : []),
       ...(otherPresets.length ? [{ label: '預設', options: otherPresets }] : []),
       { label: 'OpenRouter (需儲值/免費)', options: openRouterOptions },
-      // (G2-6) allowCustom 為 false 時整組不列入（前端隱藏；後端另有白名單擋）
+      // allowCustom 為 false 時整組不列入（前端隱藏；後端另有白名單擋）
       ...(allowCustom
         ? [{ label: '進階功能', options: [{ value: 'custom', label: '✨ 自訂輸入 (貼上模型 ID)...' }] }]
         : []),
@@ -72,7 +70,6 @@ function ModelSelector({
   const currentOption = items.find((it) => it.kind === 'option' && it.value === model);
   const currentLabel = currentOption ? currentOption.label : model || '選擇模型';
 
-  // --- 點擊面板外關閉 ---
   useEffect(() => {
     if (!open) return;
     const handlePointerDown = (e) => {
@@ -100,7 +97,7 @@ function ModelSelector({
     const rect = buttonRef.current.getBoundingClientRect();
     const spaceBelow = window.innerHeight - rect.bottom;
     const spaceAbove = rect.top;
-    const needed = panelRef.current.offsetHeight + 8; // 8px 間隙
+    const needed = panelRef.current.offsetHeight + 8;
     setDropUp(spaceBelow < needed && spaceAbove > spaceBelow);
   }, [open]);
 
@@ -124,12 +121,12 @@ function ModelSelector({
     setActiveIndex(selectableIndexes[nextPos]);
   };
 
-  // 選擇項目：維持原本 onChange 行為（custom 切換到輸入模式，其餘直接 setModel）
+  // 選擇項目：custom 切換到輸入模式，其餘直接 setModel
   const selectOption = (item) => {
     if (item.disabled) return;
     if (item.value === 'custom') {
       setIsCustomModel(true);
-      setModel(''); // 清空，讓使用者準備輸入
+      setModel('');
     } else {
       setModel(item.value);
     }
@@ -171,16 +168,14 @@ function ModelSelector({
 
   return (
     <div className="relative">
-      {/* --- 模型選擇區 (支援下拉與手動輸入) --- */}
       <div ref={wrapperRef} className="relative flex items-center gap-2">
 
-        {/* 裝飾用的小星星 Icon */}
         <div className="absolute inset-y-0 left-0 pl-2 flex items-center pointer-events-none z-10">
           <Sparkles className="h-3.5 w-3.5 text-[#7B90D2]" />
         </div>
 
         {!isCustomModel ? (
-          // 模式 A：自訂下拉選單（P4：面板錨點為觸發按鈕右下角）
+          // 模式 A：下拉選單
           <>
             <button
               ref={buttonRef}
@@ -211,7 +206,7 @@ function ModelSelector({
                 aria-label="選擇模型"
                 aria-activedescendant={activeIndex >= 0 ? `model-option-${activeIndex}` : undefined}
                 onKeyDown={handlePanelKeyDown}
-                /* 錨點：手機（預設）左緣對齊按鈕左緣；md 以上置中（left-1/2 + -translate-x-1/2）；上下由 top-full / bottom-full 決定 */
+                /* 錨點：手機左緣對齊按鈕、md 以上置中；上下由 top-full / bottom-full 決定 */
                 className={`absolute left-0 md:left-1/2 md:-translate-x-1/2 z-50 w-64 md:w-72 max-w-[calc(100vw-2rem)] max-h-[400px] overflow-y-auto overscroll-contain bg-white border border-gray-200 rounded-lg shadow-lg py-1 outline-none ${
                   dropUp ? 'bottom-full mb-1' : 'top-full mt-1'
                 }`}
@@ -260,7 +255,7 @@ function ModelSelector({
               onChange={(e) => setModel(e.target.value)}
               placeholder="例如: qwen/qwen-2.5-72b..."
               className="bg-transparent text-gray-700 text-xs md:text-sm rounded-lg focus:ring-2 focus:ring-[#7DB9DE] block w-40 md:w-56 pl-8 py-1 transition outline-none"
-              autoFocus // 切換過來時自動聚焦
+              autoFocus
             />
             <button
               onClick={() => {

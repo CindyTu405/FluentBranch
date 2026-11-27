@@ -37,7 +37,7 @@ export function chatReply({ text, messageId, userMessageId }) {
 
 // ---------- 對話假資料（形狀與後端 GET /chats/<root>/history 相同）----------
 
-// 甲對話的 AI 回覆；其中的「重點片語」是分支錨點（測試 4、5 共用）
+// 甲對話的 AI 回覆；其中的「重點片語」是分支錨點
 export const CHAT_A_AI_TEXT = '甲對話的回答，包含重點片語在裡面。';
 export const CHAT_A_HISTORY = [
   { id: 'a-u1', role: 'user', content: '甲對話的問題', title: '甲對話', parent_id: null, model_used: null, created_at: '2026-11-01T00:00:00Z', has_branch: false },

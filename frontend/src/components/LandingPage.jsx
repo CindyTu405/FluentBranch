@@ -3,27 +3,27 @@ import { MousePointer2, RefreshCw } from 'lucide-react';
 import MessageList from './MessageList';
 import BranchPanel from './BranchPanel';
 import { DEMO_ARTICLES, DEMO_GENERIC_ANSWER } from '../demo/demoArticles';
-// (L1-4) 自動播放（假游標）
+// 自動播放（假游標）
 import useDemoAutoplay from '../demo/useDemoAutoplay';
 
-// (L1-3) 未登入的首頁：標語、一篇示範對話，以及真的 MessageList／BranchPanel 吃假資料。
+// 未登入的首頁：標語、一篇示範對話，以及真的 MessageList／BranchPanel 吃假資料。
 // 不呼叫任何 API、不呼叫模型；所有計時器都收進 timersRef，換一篇／卸載時一次清掉。
 
-// (L1-3) 模擬串流：開始前等 STREAM_START_DELAY_MS，之後每 STREAM_TICK_MS 追加 STREAM_CHARS_PER_TICK 個字。調速改這三個常數。
+// 模擬串流：開始前等 STREAM_START_DELAY_MS，之後每 STREAM_TICK_MS 追加 STREAM_CHARS_PER_TICK 個字。調速改這三個常數。
 const STREAM_START_DELAY_MS = 500;
 const STREAM_TICK_MS = 30;
 const STREAM_CHARS_PER_TICK = 2;
 
-// (L1-3) 片語對應的分支 id（與正式資料的 id 格式無關，只在示範內使用）
+// 片語對應的分支 id（與正式資料的 id 格式無關，只在示範內使用）
 const branchIdOfPhrase = (phrase) => `b-${phrase.id}`;
 
-// (L1-3) 取前 n 個字元（以 code point 計），超過就補「…」
+// 取前 n 個字元（以 code point 計），超過就補「…」
 const takeChars = (text, n) => {
   const chars = [...text];
   return chars.length > n ? `${chars.slice(0, n).join('')}…` : text;
 };
 
-// (L1-3) 收集節點底下所有非空文字節點（依文件順序）
+// 收集節點底下所有非空文字節點（依文件順序）
 const textNodesIn = (el) => {
   const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
   const nodes = [];
@@ -33,7 +33,7 @@ const textNodesIn = (el) => {
   return nodes;
 };
 
-// (L1-3) 清掉一組計時器 id。timeout 與 interval 共用同一個 id 空間，兩個都呼叫是安全的。
+// 清掉一組計時器 id。timeout 與 interval 共用同一個 id 空間，兩個都呼叫是安全的。
 const clearTimerSet = (timers) => {
   timers.forEach((id) => {
     window.clearTimeout(id);
@@ -42,18 +42,18 @@ const clearTimerSet = (timers) => {
   timers.clear();
 };
 
-// (G2-6) onStart：開始使用（只有 AuthGate 會在按下後發起試用請求）；onLogin：頂列登入；starting：試用建立中（按鈕停用、顯示「準備中…」）
+// onStart：開始使用（只有 AuthGate 會在按下後發起試用請求）；onLogin：頂列登入；starting：試用建立中（按鈕停用、顯示「準備中…」）
 export default function LandingPage({ onStart, onLogin, starting = false }) {
-  // (L1-3) 每次打開隨機一篇；「換一篇」往後移一篇
+  // 每次打開隨機一篇；「換一篇」往後移一篇
   const [articleIndex, setArticleIndex] = useState(() => Math.floor(Math.random() * DEMO_ARTICLES.length));
   const article = DEMO_ARTICLES[articleIndex];
 
-  // (L1-3) branches：已開過的示範分支（形狀同正式介面的 branches）；branchList：同 GET /chats/{root}/branches 的列資料
+  // branches：已開過的示範分支（形狀同正式介面的 branches）；branchList：同 GET /chats/{root}/branches 的列資料
   const [branches, setBranches] = useState([]);
   const [branchList, setBranchList] = useState([]);
   const [activeBranchId, setActiveBranchId] = useState(null);
   const [panelOpen, setPanelOpen] = useState(false);
-  // (L1-7) 每按一次「換一篇」加一，讓自動播放從頭再播
+  // 每按一次「換一篇」加一，讓自動播放從頭再播
   const [autoplayKey, setAutoplayKey] = useState(0);
 
   const scrollContainerRef = useRef(null);
@@ -62,13 +62,13 @@ export default function LandingPage({ onStart, onLogin, starting = false }) {
 
   const clearAllTimers = () => clearTimerSet(timersRef.current);
 
-  // (L1-3) 卸載時清掉所有計時器（StrictMode 的第二次掛載不受影響：這裡沒有東西要重啟）
+  // 卸載時清掉所有計時器（StrictMode 的第二次掛載不受影響：這裡沒有東西要重啟）
   useEffect(() => {
     const timers = timersRef.current;
     return () => clearTimerSet(timers);
   }, []);
 
-  // (L1-3) 主對話：一問一答，固定來自目前這篇文章
+  // 主對話：一問一答，固定來自目前這篇文章
   const messages = useMemo(
     () => [
       { id: `${article.id}-u`, role: 'user', content: article.question },
@@ -77,7 +77,7 @@ export default function LandingPage({ onStart, onLogin, starting = false }) {
     [article]
   );
 
-  // (L1-3) 尚未建立分支的片語才顯示虛線提示
+  // 尚未建立分支的片語才顯示虛線提示
   const anchorHints = article.phrases
     .filter((phrase) => !branchList.some((b) => b.id === branchIdOfPhrase(phrase)))
     .map((phrase) => ({
@@ -87,9 +87,9 @@ export default function LandingPage({ onStart, onLogin, starting = false }) {
       end: phrase.end,
     }));
 
-  // (L1-3) 點提示＝程式幫忙選取該片語（之後 MessageList 會出現真的「建立分支」按鈕）。
+  // 點提示＝程式幫忙選取該片語（MessageList 的「建立分支」按鈕會出現）。
   // 選取範圍：第一個 mark 的第一個文字節點開頭 → 最後一個 mark 的最後一個文字節點結尾。
-  // (L1-4) 自動播放也呼叫這個函式，請保持它只依賴 DOM，不依賴其他 state。
+  // 自動播放也呼叫這個函式，請保持它只依賴 DOM，不依賴其他 state。
   const selectHint = (hint) => {
     const root = scrollContainerRef.current;
     if (!root) return;
@@ -109,8 +109,8 @@ export default function LandingPage({ onStart, onLogin, starting = false }) {
     sel.addRange(range);
   };
 
-  // (L1-4) 自動播放：游標位置與是否顯示由 hook 決定。
-  // (L1-7) 自動播放會把所有虛線片語依序點完；使用者互動即停止這一輪，按「換一篇」會重新開始。
+  // 自動播放：游標位置與是否顯示由 hook 決定。
+  // 自動播放會把所有虛線片語依序點完；使用者互動即停止這一輪，按「換一篇」會重新開始。
   const cursor = useDemoAutoplay({
     scrollContainerRef,
     selectHint,
@@ -123,7 +123,7 @@ export default function LandingPage({ onStart, onLogin, starting = false }) {
     setPanelOpen(true);
   };
 
-  // (L1-3) 模擬串流：500 ms 後每 30 ms 追加 2 個字，全部送完才把 isLoading 設回 false
+  // 模擬串流：500 ms 後每 30 ms 追加 2 個字，全部送完才把 isLoading 設回 false
   const streamReply = (branchId, messageId, answer) => {
     const delayId = window.setTimeout(() => {
       timersRef.current.delete(delayId);
@@ -153,7 +153,7 @@ export default function LandingPage({ onStart, onLogin, starting = false }) {
     timersRef.current.add(delayId);
   };
 
-  // (L1-3) MessageList 按「建立分支」時呼叫
+  // MessageList 按「建立分支」時呼叫
   const handleCreateBranch = (messageId, text, start, end) => {
     const hasOffsets = Number.isInteger(start) && Number.isInteger(end);
     const phrase = hasOffsets
@@ -241,12 +241,12 @@ export default function LandingPage({ onStart, onLogin, starting = false }) {
     streamReply(id, `${id}-a`, DEMO_GENERIC_ANSWER);
   };
 
-  // (L1-3) 換一篇：停止所有計時器，清掉示範分支與選取，關面板
+  // 換一篇：停止所有計時器，清掉示範分支與選取，關面板
   const nextArticle = () => {
     clearAllTimers();
     window.getSelection()?.removeAllRanges();
     setArticleIndex((i) => (i + 1) % DEMO_ARTICLES.length);
-    setAutoplayKey((k) => k + 1); // (L1-7) 讓自動播放從頭再播
+    setAutoplayKey((k) => k + 1);
     setBranches([]);
     setBranchList([]);
     setActiveBranchId(null);
@@ -255,7 +255,7 @@ export default function LandingPage({ onStart, onLogin, starting = false }) {
 
   return (
     <div className="h-screen supports-[height:100dvh]:h-dvh flex flex-col bg-white text-gray-800 font-sans overflow-hidden">
-      {/* (L1-3) 頂列：logo、名稱、登入（(L1-10) 隱私權說明移到主對話底部說明列） */}
+      {/* 頂列：logo、名稱、登入 */}
       <header className="flex items-center justify-between px-4 md:px-6 py-2.5 border-b border-gray-200 flex-shrink-0">
         <div className="flex items-center gap-2">
           <img src="/favicon.svg" alt="" aria-hidden="true" className="w-7 h-7" />
@@ -272,16 +272,15 @@ export default function LandingPage({ onStart, onLogin, starting = false }) {
         </div>
       </header>
 
-      {/* (L1-3) 展示區：主對話＋右側分支面板；格線背景放在這一層 */}
+      {/* 展示區：主對話＋右側分支面板；格線背景放在這一層 */}
       <div className="flex-1 min-h-0 flex flex-col md:flex-row bg-[#E8F1F5] bg-[linear-gradient(to_right,#d3e3eb_1px,transparent_1px),linear-gradient(to_bottom,#d3e3eb_1px,transparent_1px)] bg-[size:16px_16px]">
-        {/* (L1-6) 標語區：桌面（md 以上）是左側白底欄（右緣漸層淡出到格線）；手機是上方白底、底緣漸層淡出到格線（bg-linear-to-b from-white from-60% to-transparent：from-60% 決定白色維持到區塊高度 60% 處，之後漸淡；調整 pb-6 可改淡出高度，改 from-60% 可改淡出起點）。桌面三欄比例（視窗寬度）：標語 34%（md:w-[30%] lg:w-[34%]，上限 md:max-w-[600px]）／主對話吃剩下的／分支面板 28%（BranchPanel 的 defaultWidthPercent）。標語字級：md:text-4xl lg:text-5xl；欄內左右留白：md:px-10 lg:px-14。 */}
-        {/* (L1-9) 手機：白底＋底部漸層淡出，pb-6 給淡出留空間。(L1-10) 桌面：md:bg-linear-to-r 改成往右淡出、md:from-75% 白色維持到欄寬 75%，不再有右側分隔線 */}
+        {/* 標語區：手機為上方白底、底緣淡出到格線；桌面為左側白底欄、右緣淡出到格線 */}
         <section className="flex-shrink-0 px-4 pt-5 pb-6 text-center bg-linear-to-b from-white from-60% to-transparent md:w-[30%] lg:w-[34%] md:max-w-[600px] md:px-10 lg:px-14 md:py-0 md:flex md:flex-col md:justify-center md:items-start md:text-left md:bg-linear-to-r md:from-75%">
           <h1 className="text-xl md:text-4xl lg:text-5xl md:leading-[1.15] font-semibold tracking-tight text-gray-800">
             追問細節，<br className="hidden md:block" />不打亂主線
           </h1>
           <p className="mt-1 md:mt-5 text-sm md:text-base lg:text-lg md:leading-relaxed md:max-w-[20em] text-gray-500">選取 AI 回答裡的任何一段文字，開啟分支問額外問題，避免主要對話混亂。</p>
-          {/* (L1-9) 手機隱藏標語區的開始按鈕（底部列仍有）；md:block 與原本在 flex 欄中的呈現一致 */}
+          {/* 手機隱藏此按鈕（底部列仍有） */}
           <button
             type="button"
             onClick={onStart}
@@ -293,8 +292,7 @@ export default function LandingPage({ onStart, onLogin, starting = false }) {
         </section>
 
         <div className="flex-1 min-h-0 min-w-0 flex flex-col relative">
-          {/* (L1-3) 示範列：位於標語區下方，透明疊在格線上 */}
-          {/* (L1-9) 手機只顯示「換一篇」按鈕（靠右、隱藏左側說明文字）；md 以上維持左文字右按鈕 */}
+          {/* 示範列：手機只顯示「換一篇」，md 以上為左文字右按鈕 */}
           <div className="flex items-center justify-end md:justify-between gap-3 px-4 md:px-6 pt-2 pb-1 text-xs text-gray-500 flex-shrink-0">
             <span className="hidden md:block min-w-0 truncate">範例 · {article.topic}{'\u3000'}點虛線文字，或選取以開啟分支</span>
             <button
@@ -319,10 +317,9 @@ export default function LandingPage({ onStart, onLogin, starting = false }) {
             onHintClick={selectHint}
           />
 
-          {/* (L1-3) 主對話底部：取代原本輸入框的說明列 */}
-          {/* (L1-11) 做成像輸入框的浮動圓角卡片：mx-* 左右內縮、mb-* 往上抬、rounded-2xl 圓角、shadow-sm 浮起感 */}
+          {/* 主對話底部說明列（浮動圓角卡片，外觀接近輸入框） */}
           <div className="flex items-center justify-between gap-3 mx-3 md:mx-6 mb-3 md:mb-5 mt-1 pl-4 pr-2 py-2 rounded-2xl border border-gray-200 bg-white shadow-sm text-sm text-gray-500 flex-shrink-0">
-            {/* (L1-10) 隱私權說明接在句子後面，跟著句子換行，不擠壓「開始使用」按鈕 */}
+            {/* 隱私權說明接在句子後面，跟著句子換行，不擠壓「開始使用」按鈕 */}
             <span>
               按「開始使用」即可自行輸入問題。
               <a
@@ -376,7 +373,7 @@ export default function LandingPage({ onStart, onLogin, starting = false }) {
         )}
       </div>
 
-      {/* (L1-4) 假游標：只在自動播放期間渲染；pointer-events-none 不擋使用者操作 */}
+      {/* 假游標：只在自動播放期間渲染；pointer-events-none 不擋使用者操作 */}
       {cursor.visible && (
         <div
           aria-hidden="true"

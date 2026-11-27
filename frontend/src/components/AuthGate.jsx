@@ -2,11 +2,11 @@ import { useCallback, useEffect, useState } from 'react';
 import { FcGoogle } from 'react-icons/fc';
 import { FaGithub } from 'react-icons/fa';
 import App from '../App';
-// (L1-3) 未登入的首頁
+// 未登入的首頁
 import LandingPage from './LandingPage';
-// (G2-7) 訪客對話搬移對話框
+// 訪客對話搬移對話框
 import GuestClaimDialog from './GuestClaimDialog';
-// (G2-10) 連結 OpenRouter 結果的橫幅
+// 連結 OpenRouter 結果的橫幅
 import OpenRouterNotice from './OpenRouterNotice';
 import { API_URL, apiFetch } from '../api';
 
@@ -25,7 +25,7 @@ function readAuthError() {
     : AUTH_ERROR_FALLBACK;
 }
 
-// (G2-10) 連結 OpenRouter 的結果（後端導回 /?openrouter=connected 或 /?openrouter_error=<code>）
+// 連結 OpenRouter 的結果（後端導回 /?openrouter=connected 或 /?openrouter_error=<code>）
 // 與 readAuthError 相同做法：固定文案、own-property 查表、不認得的代碼用通用訊息，絕不顯示原始參數
 const OPENROUTER_OK_MESSAGE = '已連結 OpenRouter。現在不限則數，可用任何模型。';
 const OPENROUTER_ERROR_MESSAGES = {
@@ -52,7 +52,7 @@ function readOpenRouterNotice() {
   };
 }
 
-// (G2-6) notice：從首頁試用失敗等情況帶進來的提示（琥珀色框）；backLabel：返回按鈕文字（聊天中的登入頁用「← 返回」）
+// notice：從首頁試用失敗等情況帶進來的提示（琥珀色框）；backLabel：返回按鈕文字（聊天中的登入頁用「← 返回」）
 function LoginPage({ onBack, notice = null, backLabel = '← 回首頁' }) {
   // 只在掛載時讀一次，讀完立刻把參數從網址移除（重新整理不會再出現）
   const [errorMessage] = useState(readAuthError);
@@ -82,7 +82,7 @@ function LoginPage({ onBack, notice = null, backLabel = '← 回首頁' }) {
             {errorMessage}
           </p>
         )}
-        {/* (G2-6) 試用失敗等提示：琥珀色，和紅色的 auth_error 區分開 */}
+        {/* 試用失敗等提示：琥珀色，和紅色的 auth_error 區分開 */}
         {notice && (
           <p role="status" className="w-full text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-center">
             {notice}
@@ -96,7 +96,7 @@ function LoginPage({ onBack, notice = null, backLabel = '← 回首頁' }) {
           <FaGithub className="w-5 h-5" aria-hidden="true" />
           使用 GitHub 繼續
         </a>
-        {/* (L1-3) 回首頁：回到未登入的首頁展示 */}
+        {/* 回首頁：回到未登入的首頁展示 */}
         <button
           type="button"
           onClick={onBack}
@@ -120,24 +120,24 @@ function LoginPage({ onBack, notice = null, backLabel = '← 回首頁' }) {
 // user：undefined = 檢查中、null = 未登入、object = 已登入
 function AuthGate() {
   const [user, setUser] = useState(undefined);
-  // (L1-3) 未登入時顯示首頁（landing）或登入頁（login）；網址帶 auth_error 時直接進登入頁。
+  // 未登入時顯示首頁（landing）或登入頁（login）；網址帶 auth_error 時直接進登入頁。
   // 用惰性初始化在 LoginPage 移除參數之前讀取
   const [view, setView] = useState(() =>
     new URLSearchParams(window.location.search).has('auth_error') ? 'login' : 'landing'
   );
-  // (G2-6) 「開始使用」進行中（按鈕停用，避免重複發起試用請求）
+  // 「開始使用」進行中（按鈕停用，避免重複發起試用請求）
   const [starting, setStarting] = useState(false);
-  // (G2-6) 登入頁上方的提示文字（試用失敗時設定；返回首頁時清掉）
+  // 登入頁上方的提示文字（試用失敗時設定；返回首頁時清掉）
   const [loginNotice, setLoginNotice] = useState(null);
-  // (G2-7) 變更 key 會讓 App 整個重新掛載（用於搬移對話後重新載入側欄對話列表）
+  // 變更 key 會讓 App 整個重新掛載（用於搬移對話後重新載入側欄對話列表）
   const [appKey, setAppKey] = useState(0);
-  // (G2-10) OpenRouter 連結結果橫幅：只在掛載時讀一次網址（惰性初始化）
+  // OpenRouter 連結結果橫幅：只在掛載時讀一次網址（惰性初始化）
   const [openRouterNotice, setOpenRouterNotice] = useState(readOpenRouterNotice);
   const closeOpenRouterNotice = useCallback(() => setOpenRouterNotice(null), []);
-  // (L1-12) 訪客在聊天中回到首頁：首頁蓋在 App 上面，App 只隱藏不卸載（對話、捲動位置保留）
+  // 訪客在聊天中回到首頁：首頁蓋在 App 上面，App 只隱藏不卸載（對話、捲動位置保留）
   const [showLanding, setShowLanding] = useState(false);
 
-  // (G2-10) 讀完立刻把 openrouter / openrouter_error 從網址移除（重新整理不會再出現；寫法同 LoginPage 的 auth_error）
+  // 讀完立刻把 openrouter / openrouter_error 從網址移除（重新整理不會再出現；寫法同 LoginPage 的 auth_error）
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (!params.has('openrouter') && !params.has('openrouter_error')) return;
@@ -151,7 +151,7 @@ function AuthGate() {
     );
   }, []);
 
-  // (G2-6) 重新讀取 /auth/me：成功＝使用者資料，非 200 或網路錯誤＝視為未登入
+  // 重新讀取 /auth/me：成功＝使用者資料，非 200 或網路錯誤＝視為未登入
   const refreshUser = useCallback(async () => {
     try {
       const res = await apiFetch('/auth/me');
@@ -165,9 +165,9 @@ function AuthGate() {
   useEffect(() => {
     const onUnauthorized = () => {
       setUser(null);
-      // (G2-6) 失效後回首頁（不是登入頁）
+      // 失效後回首頁（不是登入頁）
       setView('landing');
-      // (L1-12) 失效後不再蓋著首頁旗標（user 為 null 時本來就不看它）
+      // 失效後清掉首頁旗標（user 為 null 時本來就不看它）
       setShowLanding(false);
     };
     window.addEventListener('auth:unauthorized', onUnauthorized);
@@ -178,7 +178,7 @@ function AuthGate() {
     };
   }, [refreshUser]);
 
-  // (L1-12) 訪客進到聊天時，確保歷史裡是「首頁 → 聊天」兩筆，讓瀏覽器的上一頁能回首頁
+  // 訪客進到聊天時，確保歷史裡是「首頁 → 聊天」兩筆，讓瀏覽器的上一頁能回首頁
   // 網址不變（不傳 URL），只用 history.state 的 ctView 區分；重新整理時若已停在首頁那筆，就留在首頁
   useEffect(() => {
     if (!user?.is_guest) return;
@@ -191,7 +191,7 @@ function AuthGate() {
     }
   }, [user?.is_guest]);
 
-  // (L1-12) 上一頁／下一頁：依移到的那一筆的 ctView 決定顯示首頁或聊天；登入的使用者忽略
+  // 上一頁／下一頁：依移到的那一筆的 ctView 決定顯示首頁或聊天；登入的使用者忽略
   useEffect(() => {
     const onPop = (e) => {
       if (!user?.is_guest) return;
@@ -205,9 +205,9 @@ function AuthGate() {
     };
   }, [user?.is_guest]);
 
-  // (G2-6) 首頁「開始使用」：按下才發試用請求（首頁本身不發請求）；成功後重新讀取 /auth/me 進入聊天
+  // 首頁「開始使用」：按下才發試用請求（首頁本身不發請求）；成功後重新讀取 /auth/me 進入聊天
   const startGuest = async () => {
-    // (L1-12) 已是訪客（從聊天回到首頁後再按）：直接回聊天，不打 /auth/guest，不扣試用名額
+    // 已是訪客（從聊天回到首頁後再按）：直接回聊天，不打 /auth/guest，不扣試用名額
     if (user?.is_guest) {
       window.history.pushState({ ctView: 'app' }, '');
       setShowLanding(false);
@@ -235,7 +235,7 @@ function AuthGate() {
     }
   };
 
-  // (G2-10) 橫幅放在每個分支最前面（固定定位，不影響版面）；沒有結果時為 null，App 的位置不變，不會因此重新掛載
+  // 橫幅放在每個分支最前面（固定定位，不影響版面）；沒有結果時為 null，App 的位置不變，不會因此重新掛載
   const banner = openRouterNotice && (
     <OpenRouterNotice notice={openRouterNotice} onClose={closeOpenRouterNotice} />
   );
@@ -267,8 +267,8 @@ function AuthGate() {
       </>
     );
   }
-  // (G2-6) 訪客在聊天中按「登入」：登入頁以覆蓋層顯示，App 保持掛載（不遺失目前的對話）
-  // (L1-12) 訪客且在首頁那筆：首頁蓋在 App 上面；App 外面的 div 永遠存在，切換時 App 不會重新掛載
+  // 訪客在聊天中按「登入」：登入頁以覆蓋層顯示，App 保持掛載（不遺失目前的對話）
+  // 訪客且在首頁那筆：首頁蓋在 App 上面；App 外面的 div 永遠存在，切換時 App 不會重新掛載
   const showGuestLanding = user.is_guest && showLanding;
   return (
     <>
@@ -290,7 +290,7 @@ function AuthGate() {
           <LoginPage backLabel="← 返回" onBack={() => setView('landing')} />
         </div>
       )}
-      {/* (G2-7) 登入後有待搬移的試用對話：顯示一次對話框；完成後重新讀取 /auth/me（guest_claim 變成 null，對話框消失）並用 key 重新掛載 App，讓側欄重新載入對話列表 */}
+      {/* 登入後有待搬移的試用對話：顯示對話框；完成後重新讀取 /auth/me 並以 key 重新掛載 App，讓側欄重新載入 */}
       {!user.is_guest && user.guest_claim && (
         <GuestClaimDialog
           chatCount={user.guest_claim.chat_count}

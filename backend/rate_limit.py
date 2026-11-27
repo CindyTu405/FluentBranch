@@ -1,4 +1,4 @@
-"""(G2-2) slowapi limiter 的單一實例。main 與 auth_routes 都從這裡匯入，避免循環匯入。"""
+"""slowapi limiter 的單一實例。main 與 auth_routes 都從這裡匯入，避免循環匯入。"""
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 

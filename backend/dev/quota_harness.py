@@ -1,15 +1,4 @@
-"""(V1-2) 每日額度、每分鐘限流與輸出上限的測試腳本。
-
-用法（只用臨時資料庫，不要指向正式 chat_db）：
-    cd backend && POSTGRES_DB=v1_quota SQL_ECHO=false uv run python dev/quota_harness.py 2>&1 | grep -v sqlalchemy | tail -5
-
-做的事：
-- 建立測試 User + AuthSession，測試資料都寫 user_id；結束時只清掉本腳本建立的 user（daily_usage 一併清）。
-- 把 main.gemini_chat_stream / main.openrouter_chat_stream 換成假串流（計數、可指定失敗方式），絕不呼叫真模型。
-- 把 main.get_free_models 換成空清單，避免白名單檢查去連 OpenRouter。
-- 在 127.0.0.1:8768 起真的 uvicorn（背景 thread），用 HTTP 打 API。
-- 限流只在第 10 案開啟，其餘案例關閉，避免測試本身被每分鐘 10 次擋住。
-"""
+"""每日額度、每分鐘限流與輸出上限的測試。"""
 import asyncio
 import json
 import os
@@ -43,7 +32,7 @@ import auth_routes  # noqa: E402
 from database import engine  # noqa: E402
 from models import AuthSession, Branch, DailyUsage, Message, User  # noqa: E402
 
-# database.py 的 echo 會印出所有 SQL；這個腳本只看測試結果，關掉它（只影響本腳本）。
+# 關掉 SQL echo，只看測試結果。
 engine.echo = False
 
 PORT = 8768
@@ -111,7 +100,6 @@ def run(fn):
         check(fn.__name__, False, f"exception: {e!r}")
 
 
-# ---------- 共用小工具 ----------
 
 def reset_env(user_limit: int = 20, site_limit: int = 100000):
     os.environ["DAILY_MESSAGE_LIMIT"] = str(user_limit)
@@ -207,7 +195,6 @@ def chat_body(message: str = "hi", **extra) -> dict:
     return body
 
 
-# ---------- 案例 ----------
 
 def t01_limit_20():
     """第 20 次成功、第 21 次 429 且沒有新訊息、沒有呼叫 LLM。"""
@@ -596,7 +583,6 @@ def t12_rollback():
           f"usage={usage(uid)} msgs={msg_count(uid)}")
 
 
-# ---------- 伺服器與清理 ----------
 
 def start_server() -> uvicorn.Server:
     config = uvicorn.Config(main.app, host="127.0.0.1", port=PORT, log_level="warning")

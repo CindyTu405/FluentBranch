@@ -12,19 +12,15 @@ MOCK_RESPONSES = [
 
 
 async def mock_chat_stream(message: str, history: list):
-    """
-    模擬 AI 思考並產生串流文字 (Generator)
-    """
-    # 模擬網路延遲 (假裝 AI 在思考)
+    """模擬 AI 串流回覆（逐字 yield）。"""
+    # 模擬延遲
     await asyncio.sleep(1)
 
-    # 如果有歷史紀錄，AI 會試著引用上一句話
     intro = ""
     if history:
-        last_msg = history[-1]  # 取得上一則訊息
+        last_msg = history[-1]
         intro = f"（我看到你上一句說了：{last_msg.content}）\n"
 
-    # 設計不同的回覆策略
     responses = [
         "這是一個模擬的 AI 回覆。",
         "FastAPI + PostgreSQL 是個強大的組合！",
@@ -33,15 +29,12 @@ async def mock_chat_stream(message: str, history: list):
     ]
     response_text = intro + random.choice(responses)
 
-    # (舊)隨機選一句話來回覆
-    # response_text = random.choice(MOCK_RESPONSES)
-
-    # 如果使用者問特定問題，給固定回答 (方便測試)
+    # 特定輸入給固定回答，方便測試
     if "你好" in message:
         response_text = intro + "你好呀！很高興見到你。"
 
-    # 3. 模擬打字機效果 (一個字一個字吐出來)
+    # 逐字吐出，模擬打字機效果
     for char in response_text:
-        yield char  # 吐出一個字
-        # 隨機暫停一下，讓感覺更像真人在打字
+        yield char
+        # 隨機停頓，模擬打字節奏
         await asyncio.sleep(random.uniform(0.05, 0.2))

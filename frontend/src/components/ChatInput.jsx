@@ -3,22 +3,22 @@ import { Send } from 'lucide-react';
 import { handleEnterKey } from '../keyUtils';
 import ModelSelector from './ModelSelector';
 
-// (G3) 主對話／分支面板共用此組件；差異集中在這張表（目前只有提示文字）
+// 主對話／分支面板共用此組件；差異集中在這張表（目前只有提示文字）
 const CHAT_INPUT_VARIANTS = {
   main: { hint: 'AI模型有可能會出錯，請檢察回覆內容。' },
   branch: { hint: '分支訊息與主對話各自獨立，不會影響原本的時間線' },
 };
 
 // 底部輸入區塊：自動高度的輸入框、送出按鈕、Enter 行為處理、下方的模型選單
-// (G3) variant：'main'（預設）或 'branch'，決定下方提示文字；placeholder 可自訂輸入框提示。
-// (V1-3) model 為空（沒有可用模型）時停用送出；Enter 也會經過 onSend，由父層 handler 提早 return。
+// variant：'main'（預設）或 'branch'，決定下方提示文字；placeholder 可自訂輸入框提示。
+// model 為空（沒有可用模型）時停用送出；Enter 也會經過 onSend，由父層 handler 提早 return。
 // 選項載入完成、沒有預設模型且不在自訂模式時，輸入框顯示「暫無可用模型」。
 function ChatInput({
   input, setInput, isLoading, onSend,
   model, setModel, isCustomModel, setIsCustomModel, freeModels, freeModelsLoading,
   presets, defaultModel, optionsLoading,
   variant = 'main', placeholder = '輸入訊息...',
-  allowCustom = false, // (G2-6) 是否允許自訂模型輸入，轉給 ModelSelector
+  allowCustom = false, // 是否允許自訂模型輸入，轉給 ModelSelector
 }) {
   const v = CHAT_INPUT_VARIANTS[variant] || CHAT_INPUT_VARIANTS.main;
   const textareaRef = useRef(null);
@@ -29,7 +29,7 @@ function ChatInput({
   // 監聽 input 內容，自動調整輸入框高度
   useEffect(() => {
     if (!textareaRef.current) return;
-    // P2: 未輸入（含只有空白字元）時維持單行高度
+    // 未輸入（含只有空白字元）時維持單行高度
     if (input.trim() === '') {
       textareaRef.current.style.height = '56px';
       // 空白時內容高度（56px 含邊框）略大於可用區（54px），隱藏捲軸避免出現空的滾動條
@@ -37,19 +37,17 @@ function ChatInput({
       return;
     }
     textareaRef.current.style.overflowY = '';
-    // 步驟 A: 先把高度強制重置回基礎高度，這樣如果刪除文字，框才會縮小
+    // 先重置為 auto，刪字時框才會縮小
     textareaRef.current.style.height = 'auto';
-    // 步驟 B: 將高度設定為內容的實際高度 (scrollHeight)
     textareaRef.current.style.height = `${textareaRef.current.scrollHeight + 2}px`;
-  }, [input]); // <-- 依賴項是 input，文字改變時就會觸發
+  }, [input]);
 
-  // P3: 手機端（< 768px）Enter 改為換行，PC 端維持 Enter 送出、Shift + Enter 換行
+  // 手機端（< 768px）Enter 換行；PC 端 Enter 送出、Shift + Enter 換行
   const handleKeyDown = (e) => {
     handleEnterKey(e, onSend);
   };
 
   return (
-    // 輸入框區塊 - 這裡將背景改為透明，融入網格
     <div className="p-4 bg-white/70 backdrop-blur-sm border-t border-gray-200">
       <div className="max-w-4xl mx-auto relative group">
         <textarea

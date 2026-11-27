@@ -1,9 +1,6 @@
 // rehype 外掛：依 offset 錨點在 text node 內部分割，重疊段包 <mark data-branch>，
 // 其餘片段包 <span data-s data-e>（讓選取對映仍可用）。跳過 code/pre。
-//
-// 這解決 split 高亮的兩個 bug：
-//   1. 換行 —— 只在 text node 內部切割，段落/粗體/列表等結構原封不動。
-//   2. 重複文字 —— 依 offset（字元位置）定位，只包選取的那一段，不命中相同文字。
+//   只在 text node 內部切割，段落／粗體／列表結構原樣保留；依 offset 定位，重複文字不會誤命中。
 //
 // anchors：Array of { id, start, end }，start/end 是 source markdown 的半開區間 [start, end)。
 export default function rehypeHighlight(anchors) {
@@ -29,8 +26,7 @@ export default function rehypeHighlight(anchors) {
   };
 }
 
-// (B7) 依文件順序走訪所有 mark：每個分支的第一段加 data-first，最後一段加 data-last
-// （只有一段時兩個都加）。樣式靠這兩個屬性決定哪一側圓角、留白。
+// 依文件順序標記每個分支的首尾段（data-first／data-last；只有一段時兩者都加），供樣式決定圓角側。
 function markFirstAndLast(tree) {
   const seen = new Set();
   const lastById = new Map();

@@ -1,9 +1,7 @@
-"""(G2-8) 使用者 OpenRouter 金鑰的 Fernet 加解密。
+"""使用者 OpenRouter 金鑰的 Fernet 加解密。
 
-設計：
-    - 金鑰來自環境變數 CREDENTIAL_ENCRYPTION_KEY（Fernet 金鑰），每次呼叫都重讀，不做模組層快取。
-    - 沒有預設金鑰；未設定或格式錯誤 → encryption_configured() 為 False，加解密一律拋 CredentialKeyError。
-    - 例外訊息是固定文字：絕不包含明碼、密文或加密金鑰。
+金鑰每次呼叫都從 CREDENTIAL_ENCRYPTION_KEY 重讀；未設定或格式錯誤時加解密拋 CredentialKeyError。
+例外訊息固定，絕不含明碼、密文或金鑰。
 """
 
 import os

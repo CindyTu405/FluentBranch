@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { handleEnterKey } from '../keyUtils';
 
-// (F9-2) 編輯框自動長高的上限行數（可調；對齊 G9 摺疊行數）。超過就在框內捲動。
+// 編輯框自動長高的上限行數（對齊 user 訊息的摺疊行數），超過就在框內捲動。
 const EDITOR_MAX_LINES = 10;
-// (F9-2) 量不到 line-height（值為 normal）時的備用行高（px）
+// 量不到 line-height（值為 normal）時的備用行高（px）
 const FALLBACK_LINE_HEIGHT = 24;
 
-// (F9-2) 最後一則 user 訊息的內嵌編輯框：原地取代泡泡，textarea 本身就是框。
+// 最後一則 user 訊息的內嵌編輯框：原地取代泡泡，textarea 本身就是框。
 // props:
 //   original      原文（預填；也是「內容沒改就停用送出」的比對基準）
 //   branchCount   這則 user 之後那則 AI 回覆上的分支數（> 0 才顯示紅色警語；含空分支）
@@ -16,7 +16,7 @@ export default function UserMessageEditor({ original, branchCount, onSubmit, onC
   const [text, setText] = useState(original);
   const textareaRef = useRef(null);
 
-  // 送出條件：trim 後不是空字串，而且與原文不同（沒改就送出等於重傳，那是 G6 重傳鈕的工作）
+  // 送出條件：trim 後不是空字串，而且與原文不同（沒改就送出等於重傳，由重傳鈕處理）
   const canSubmit = text.trim() !== '' && text !== original;
 
   // 開啟時自動聚焦，游標放在文字結尾
@@ -63,10 +63,9 @@ export default function UserMessageEditor({ original, branchCount, onSubmit, onC
   };
 
   return (
-    // (F9-2) 整個編輯區撐滿 user 欄（父層已給 w-full）
+    // 整個編輯區撐滿 user 欄（父層已給 w-full）
     <div className="w-full">
-      {/* (F9-2) 編輯框：白底、主題藍邊框、右上角直角（與 user 泡泡同一個形狀）。
-          顏色與圓角可調：border-[#51A8DD]／rounded-2xl rounded-tr-none／focus:ring-[#51A8DD]/40 */}
+      {/* 編輯框樣式：與 user 泡泡同形狀，主題藍邊框 */}
       <textarea
         ref={textareaRef}
         value={text}
@@ -77,14 +76,14 @@ export default function UserMessageEditor({ original, branchCount, onSubmit, onC
         className="w-full bg-white text-gray-800 text-[15px] leading-relaxed px-5 py-3.5 rounded-2xl rounded-tr-none border border-[#51A8DD] shadow-md focus:outline-none focus:ring-2 focus:ring-[#51A8DD]/40 resize-none"
       />
 
-      {/* (F9-2) 分支警語：只在這則 AI 回覆上有分支時出現；N 由 MessageList 算好傳入 */}
+      {/* 分支警語：只在這則 AI 回覆有分支時出現；N 由 MessageList 傳入 */}
       {branchCount > 0 && (
         <p className="mt-1.5 text-xs text-red-500 text-right">
           此回覆上有 {branchCount} 個分支，重新生成後會變成幽靈分支
         </p>
       )}
 
-      {/* (F9-2) 右對齊的按鈕列：取消（灰色外框）、送出（主題藍；沒改或空白時停用） */}
+      {/* 右對齊的按鈕列 */}
       <div className="mt-2 flex justify-end gap-2">
         <button
           type="button"
@@ -93,7 +92,6 @@ export default function UserMessageEditor({ original, branchCount, onSubmit, onC
         >
           取消
         </button>
-        {/* (F9-2) 送出顏色可調：bg-[#51A8DD]；停用透明度 disabled:opacity-40 */}
         <button
           type="button"
           onClick={() => canSubmit && onSubmit(text)}

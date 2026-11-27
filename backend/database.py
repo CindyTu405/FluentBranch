@@ -4,9 +4,8 @@ from urllib.parse import quote
 
 from dotenv import load_dotenv
 
-# 從環境變數讀取連線字串 (在 docker-compose.yml / 部署平台設定的)
-# 讀不到就退回讀 repo 根目錄的 .env (backend/ 的上一層)，用裡面的 POSTGRES_* 變數組出連線字串。
-# 這裡刻意不寫死任何帳號密碼：憑證只放在環境變數或 .env，不跟著程式碼進 git。
+# DATABASE_URL 優先；沒有時退回 repo 根目錄 .env 的 POSTGRES_* 組出連線字串。
+# 憑證不寫死在程式碼裡，只放環境變數或 .env（不進 git）。
 _ENV_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env")
 
 
@@ -37,7 +36,7 @@ def _build_database_url() -> str:
             f"@localhost:5432/{quote(db_name, safe='')}"
         )
 
-    # 針對 Render/Heroku 的修正：有些平台給的網址是 postgres:// 開頭，但 SQLAlchemy 需要 postgresql://
+    # Render/Heroku 給的網址是 postgres:// 開頭，SQLAlchemy 需要 postgresql://
     if database_url.startswith("postgres://"):
         database_url = database_url.replace("postgres://", "postgresql://", 1)
 
@@ -46,14 +45,11 @@ def _build_database_url() -> str:
 
 DATABASE_URL = _build_database_url()
 
-# 建立引擎
-# echo 會在終端機印出所有 SQL 語法與參數（參數可能含對話內容），所以預設關閉；
-# 只在本機除錯時設定 SQL_ECHO=true。
+# echo 會印出所有 SQL 與參數（可能含對話內容），預設關閉，只在本機除錯時設 SQL_ECHO=true。
 _SQL_ECHO = (os.getenv("SQL_ECHO", "false") or "").strip().lower() in ("1", "true", "yes", "on")
 engine = create_engine(DATABASE_URL, echo=_SQL_ECHO)
 
-# 依賴注入 (Dependency Injection) 用
-# 讓 FastAPI 可以拿到資料庫連線
+# FastAPI 依賴注入用的 DB session。
 def get_session():
     with Session(engine) as session:
         yield session

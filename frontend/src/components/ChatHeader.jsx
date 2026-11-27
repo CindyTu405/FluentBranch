@@ -1,6 +1,6 @@
 import { Menu, PanelRight } from 'lucide-react';
 
-// 頂部導航列：側邊欄開關、對話標題、右側分支面板開關（模型選單已移到輸入框下方）
+// 頂部導航列：側邊欄開關、對話標題、分支面板開關
 function ChatHeader({
   sidebarOpen,
   setSidebarOpen,
@@ -17,13 +17,11 @@ function ChatHeader({
         >
           <Menu className="w-5 h-5" />
         </button>
-        {/* 標題顯示區域 */}
         <span className="font-medium text-gray-800 truncate max-w-[150px] md:max-w-md">
           {messages.length > 0 ? (
             // 有對話時：優先顯示 title，沒有則顯示內容摘要
             messages[0].title || messages[0].content.slice(0, 20) + (messages[0].content.length > 20 ? "..." : "")
           ) : (
-            // 沒對話時 (New Chat)
             "AI Chat"
           )}
         </span>

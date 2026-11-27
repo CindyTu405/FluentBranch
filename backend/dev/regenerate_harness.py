@@ -1,15 +1,4 @@
-"""(G6-1) 重新生成端點（POST /messages/{id}/regenerate）的測試腳本。
-
-用法：cd backend && uv run python dev/regenerate_harness.py
-
-做的事：
-- 連 docker chat_db（沿用 database.py 的設定），建立測試用 User + AuthSession（Cookie: session=<token>），
-  所有測試資料都寫 user_id，結束時只清掉本腳本建立的 user／auth_session／分支／訊息。
-- 把 main.gemini_chat_stream / main.openrouter_chat_stream 換成假串流（絕不呼叫真模型）。
-- 把 main.get_free_models 換成空清單，避免白名單檢查去打 OpenRouter 的模型清單。
-- 在 127.0.0.1:8765 起真的 uvicorn（背景 thread），用 HTTP 打 API。
-- BUFFER_RETENTION_SECONDS 調短為 2 秒，讓「緩衝清除競態」可以在測試時間內驗證。
-"""
+"""重新生成端點（POST /messages/{id}/regenerate）的測試。"""
 import asyncio
 import os
 import sys
@@ -18,7 +7,7 @@ import time
 import uuid
 from collections import deque
 
-# (V1-2) 每日額度改為很大的值：這些案例要測的不是額度，避免大量請求撞到每日上限。
+# 每日額度改為很大的值：這些案例要測的不是額度，避免大量請求撞到每日上限。
 os.environ["DAILY_MESSAGE_LIMIT"] = "100000"
 os.environ["SITE_DAILY_MESSAGE_LIMIT"] = "1000000"
 BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -33,16 +22,16 @@ from database import engine  # noqa: E402
 import auth_routes  # noqa: E402
 from models import AuthSession, Branch, Message, User  # noqa: E402
 
-# database.py 的 echo=True 會印出每一句 SQL，這個腳本只要看測試結果，關掉它（只影響本腳本）。
+# 關掉 SQL echo，只看測試結果。
 engine.echo = False
 
 PORT = 8765
 BASE = f"http://127.0.0.1:{PORT}"
 RETENTION = 2
 
-# (G6-1) 調短保留時間，讓競態測試在幾秒內完成
+# 調短保留時間，讓競態測試在幾秒內完成
 main.BUFFER_RETENTION_SECONDS = RETENTION
-# (G6-1) 不讓白名單檢查去抓 OpenRouter 免費模型清單（外部網路）；環境變數白名單仍照常生效
+# 不讓白名單檢查去抓 OpenRouter 免費模型清單（外部網路）；環境變數白名單仍照常生效
 main.get_free_models = lambda session, force_refresh=False: []
 
 FAST_CHUNKS = ["MOCK-REGEN-", "1 ", "done"]        # 合起來 "MOCK-REGEN-1 done"
@@ -54,7 +43,7 @@ SLOW_TEXT = "".join(SLOW_CHUNKS)
 # 比起全域開關，這樣每個請求拿到的模式是確定的，不會因為 thread 切換而錯亂。
 MODE_QUEUE: deque = deque()
 
-# (F9-1) 記錄每次假串流收到的 user 訊息（message 參數），用來驗證編輯後生成用的是新內容
+# 記錄每次假串流收到的 user 訊息（message 參數），用來驗證編輯後生成用的是新內容
 LLM_MESSAGES: list = []
 
 
@@ -113,7 +102,7 @@ def db_branch(branch_id: uuid.UUID) -> dict:
 
 def regen_full(client: httpx.Client, msg_id, model: str, content: str | None = None):
     """送出重新生成並把整個 body 讀完，回傳 (status, headers, text)。
-    (F9-1) content 有給才放進 body（不給 = 純重傳，與 G6 測試一模一樣）。"""
+    content 有給才放進 body（不給 = 純重傳）。"""
     body_json = {"model": model}
     if content is not None:
         body_json["content"] = content
@@ -123,7 +112,7 @@ def regen_full(client: httpx.Client, msg_id, model: str, content: str | None = N
 
 
 def reset_limiter():
-    # (G6-1) regenerate 每分鐘 10 次／IP；每個測試前重設計數，避免測試本身被限流
+    # regenerate 每分鐘 10 次／IP；每個測試前重設計數，避免測試本身被限流
     main.limiter.reset()
 
 
@@ -241,7 +230,7 @@ def run_tests(client: httpx.Client, ids: dict, uid: uuid.UUID):
     if model is None:
         return
 
-    # ---- 1. 主線 AI 重新生成 ----
+    # 主線 AI 重新生成
     reset_limiter()
     try:
         status, headers1, body1 = regen_full(client, ai_id, model)
@@ -257,7 +246,7 @@ def run_tests(client: httpx.Client, ids: dict, uid: uuid.UUID):
         check("1 regen main AI", False, f"exception: {e!r}")
         headers1 = {}
 
-    # ---- 2. 錨定分支被幽靈化 ----
+    # 錨定分支被幽靈化
     try:
         br = db_branch(branch_id)
         check("2 branch ghosted: is_orphaned true", br["is_orphaned"] is True,
@@ -278,7 +267,7 @@ def run_tests(client: httpx.Client, ids: dict, uid: uuid.UUID):
     except Exception as e:
         check("2 branch ghosting", False, f"exception: {e!r}")
 
-    # ---- 3. 側邊欄 roots 不含幽靈分支的 root ----
+    # 側邊欄 roots 不含幽靈分支的 root
     for sort_by in ["created", "updated"]:
         reset_limiter()
         try:
@@ -291,7 +280,7 @@ def run_tests(client: httpx.Client, ids: dict, uid: uuid.UUID):
         except Exception as e:
             check(f"3 /chats/roots sort_by={sort_by}", False, f"exception: {e!r}")
 
-    # ---- 4. 主線還有後續訊息 → 409 ----
+    # 主線還有後續訊息 → 409
     child_id = None
     try:
         with Session(engine) as s:
@@ -315,7 +304,7 @@ def run_tests(client: httpx.Client, ids: dict, uid: uuid.UUID):
                     s.delete(c)
                     s.commit()
 
-    # ---- 5. 生成中再按 → 409（慢速模式）----
+    # 生成中再按 → 409（慢速模式）
     try:
         MODE_QUEUE.append("slow")
         reset_limiter()
@@ -333,7 +322,7 @@ def run_tests(client: httpx.Client, ids: dict, uid: uuid.UUID):
     except Exception as e:
         check("5 still generating", False, f"exception: {e!r}")
 
-    # ---- 6. 非 AI 訊息／隨機 uuid → 404 ----
+    # 非 AI 訊息／隨機 uuid → 404
     reset_limiter()
     try:
         status, _, _ = regen_full(client, root_id, model)
@@ -344,7 +333,7 @@ def run_tests(client: httpx.Client, ids: dict, uid: uuid.UUID):
     except Exception as e:
         check("6 404 cases", False, f"exception: {e!r}")
 
-    # ---- 7. 不在白名單 → 403，且 DB 不變 ----
+    # 不在白名單 → 403，且 DB 不變
     try:
         before = db_row(ai_id)
         reset_limiter()
@@ -356,7 +345,7 @@ def run_tests(client: httpx.Client, ids: dict, uid: uuid.UUID):
     except Exception as e:
         check("7 disallowed model", False, f"exception: {e!r}")
 
-    # ---- 8. 緩衝競態：第一次的清除不能清掉第二次的緩衝 ----
+    # 緩衝競態：第一次的清除不能清掉第二次的緩衝
     try:
         reset_limiter()
         status1, _, body1 = regen_full(client, ai_id, model)  # fast，完成後開始 RETENTION 秒的倒數
@@ -389,7 +378,7 @@ def run_tests(client: httpx.Client, ids: dict, uid: uuid.UUID):
     except Exception as e:
         check("8 buffer race", False, f"exception: {e!r}")
 
-    # ---- 9. 分支自己的 AI 回覆（分支線最後一則）可以重新生成 ----
+    # 分支自己的 AI 回覆（分支線最後一則）可以重新生成
     try:
         reset_limiter()
         status, _, body = regen_full(client, b_ai_id, model)
@@ -400,12 +389,12 @@ def run_tests(client: httpx.Client, ids: dict, uid: uuid.UUID):
     except Exception as e:
         check("9 branch AI regen", False, f"exception: {e!r}")
 
-    # ---- 10. (F9-1) 帶 content 的編輯 ----
+    # 帶 content 的編輯
     run_f9_tests(client, uid, model)
 
 
 def seed_f9_pair(uid: uuid.UUID, tag: str, with_branch: bool = False) -> dict:
-    """(F9-1) 建立獨立的一組「user → AI」（最後一則）；with_branch 時再錨一個分支在 AI 上。"""
+    """建立獨立的一組「user → AI」（最後一則）；with_branch 時再錨一個分支在 AI 上。"""
     with Session(engine) as s:
         root = Message(role="user", content=f"{tag} question", parent_id=None,
                        user_id=uid, title="F9 harness")
@@ -440,7 +429,7 @@ def seed_f9_pair(uid: uuid.UUID, tag: str, with_branch: bool = False) -> dict:
 
 
 def run_f9_tests(client: httpx.Client, uid: uuid.UUID, model: str):
-    # ---- 10a/10b. 帶 content → 200；user／AI 內容與模型都更新；生成用的是新內容 ----
+    # 帶 content → 200；user／AI 內容與模型都更新；生成用的是新內容
     p1 = seed_f9_pair(uid, "F9A")
     try:
         reset_limiter()
@@ -461,7 +450,7 @@ def run_f9_tests(client: httpx.Client, uid: uuid.UUID, model: str):
     except Exception as e:
         check("10a/10b edit regen", False, f"exception: {e!r}")
 
-    # ---- 10c. 編輯時錨在 AI 上的分支照樣幽靈化（與 G6 測試相同的檢查） ----
+    # 編輯時錨在 AI 上的分支照樣幽靈化
     p2 = seed_f9_pair(uid, "F9C", with_branch=True)
     try:
         reset_limiter()
@@ -490,7 +479,7 @@ def run_f9_tests(client: httpx.Client, uid: uuid.UUID, model: str):
     except Exception as e:
         check("10c edit with anchored branch", False, f"exception: {e!r}")
 
-    # ---- 10d. content 全是空白 → 422，DB 與 LLM 都不動 ----
+    # content 全是空白 → 422，DB 與 LLM 都不動
     p3 = seed_f9_pair(uid, "F9D")
     try:
         before_u = db_row(p3["root_id"])
@@ -508,7 +497,7 @@ def run_f9_tests(client: httpx.Client, uid: uuid.UUID, model: str):
     except Exception as e:
         check("10d whitespace content", False, f"exception: {e!r}")
 
-    # ---- 10e. 不是最後一則（有後續訊息）→ 409，user 內容不得被改 ----
+    # 不是最後一則（有後續訊息）→ 409，user 內容不得被改
     p4 = seed_f9_pair(uid, "F9E")
     try:
         with Session(engine) as s:

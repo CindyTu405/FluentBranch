@@ -1,14 +1,4 @@
-"""(V1-3) 模型選項端點（GET /api/model-options）與白名單測試腳本。
-
-用法：cd backend && POSTGRES_DB=v1_models SQL_ECHO=false uv run python dev/model_options_harness.py
-
-做的事：
-- 連 docker chat_db（沿用 database.py 的設定），建立測試用 User + AuthSession，結束時只清掉本腳本建立的列。
-- 把 main.gemini_chat_stream / main.openrouter_chat_stream 換成假串流（絕不呼叫真模型）。
-- 把 main.get_free_models 換成可控的假清單（可設成空、或讓它拋錯）。
-- 在 127.0.0.1:8766 起真的 uvicorn（背景 thread），用 HTTP 打 API。
-- 白名單用 main._parse_allowed_models 解析真正的環境變數字串（例如 "none"）後設進 main.ALLOWED_MODELS。
-"""
+"""模型選項端點（GET /api/model-options）與白名單解析的測試。"""
 import asyncio
 import os
 import subprocess
@@ -17,7 +7,7 @@ import threading
 import time
 import uuid
 
-# (V1-2) 每日額度改為很大的值：這些案例要測的不是額度。
+# 每日額度改為很大的值：這些案例要測的不是額度。
 os.environ["DAILY_MESSAGE_LIMIT"] = "100000"
 os.environ["SITE_DAILY_MESSAGE_LIMIT"] = "1000000"
 BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -33,7 +23,7 @@ from database import engine  # noqa: E402
 import auth_routes  # noqa: E402
 from models import AuthSession, Branch, Message, User  # noqa: E402
 
-# database.py 的 echo=True 會印出每一句 SQL，這個腳本只要看測試結果，關掉它（只影響本腳本）。
+# 關掉 SQL echo，只看測試結果。
 engine.echo = False
 
 PORT = 8766
@@ -165,7 +155,7 @@ def cleanup(uid: uuid.UUID):
 def run_tests(client: httpx.Client, uid: uuid.UUID):
     original_env = {k: os.environ.get(k) for k in ("ALLOWED_MODELS", "DEFAULT_MODEL")}
 
-    # ---- 0. 解析函式（用真正的字串） ----
+    # 解析函式（用真正的字串）
     check("parse 'none' -> []", main._parse_allowed_models("none") == [],
           f"got {main._parse_allowed_models('none')!r}")
     check("parse 'gemini*,none' -> ['gemini*']", main._parse_allowed_models("gemini*,none") == ["gemini*"],
@@ -173,7 +163,7 @@ def run_tests(client: httpx.Client, uid: uuid.UUID):
     check("parse 'gemini*' -> ['gemini*']", main._parse_allowed_models("gemini*") == ["gemini*"],
           f"got {main._parse_allowed_models('gemini*')!r}")
 
-    # ---- 1. 未登入 → 401 ----
+    # 未登入 → 401
     try:
         with httpx.Client(base_url=BASE, timeout=30) as anon:
             r = anon.get("/api/model-options")
@@ -181,7 +171,7 @@ def run_tests(client: httpx.Client, uid: uuid.UUID):
     except Exception as e:
         check("1 unauthenticated -> 401", False, f"exception: {e!r}")
 
-    # ---- 2. ALLOWED_MODELS=none ----
+    # ALLOWED_MODELS=none
     set_state("none", None, free_models=[{"id": FREE_A}, {"id": FREE_B}])
     try:
         status, body = options(client)
@@ -206,14 +196,14 @@ def run_tests(client: httpx.Client, uid: uuid.UUID):
     except Exception as e:
         check("2b/2c none: /chat rejections", False, f"exception: {e!r}")
 
-    # ---- 2d. 同狀態下免費模型可送出 ----
+    # 同狀態下免費模型可送出
     try:
         s_free = chat(client, FREE_A)
         check("2d none: free model /chat -> 200", s_free == 200, f"status={s_free}")
     except Exception as e:
         check("2d none: free model /chat", False, f"exception: {e!r}")
 
-    # ---- 3. DEFAULT_MODEL ----
+    # DEFAULT_MODEL
     set_state("none", FREE_B)
     try:
         status, body = options(client)
@@ -238,7 +228,7 @@ def run_tests(client: httpx.Client, uid: uuid.UUID):
     except Exception as e:
         check("3c DEFAULT_MODEL empty", False, f"exception: {e!r}")
 
-    # ---- 4. gemini* 設定、未設 DEFAULT_MODEL ----
+    # gemini* 設定、未設 DEFAULT_MODEL
     set_state("gemini*", None)
     try:
         status, body = options(client)
@@ -249,7 +239,7 @@ def run_tests(client: httpx.Client, uid: uuid.UUID):
     except Exception as e:
         check("4 gemini* options", False, f"exception: {e!r}")
 
-    # ---- 4c. 精確項目與其他萬用字元 ----
+    # 精確項目與其他萬用字元
     set_state("gemini*,free/exact:free,openai/*", None)
     try:
         status, body = options(client)
@@ -259,7 +249,7 @@ def run_tests(client: httpx.Client, uid: uuid.UUID):
     except Exception as e:
         check("4c exact entry / wildcard skip", False, f"exception: {e!r}")
 
-    # ---- 5. 沒有 presets 且免費清單為空 → null ----
+    # 沒有 presets 且免費清單為空 → null
     set_state("none", None, free_models=[])
     try:
         status, body = options(client)
@@ -268,7 +258,7 @@ def run_tests(client: httpx.Client, uid: uuid.UUID):
     except Exception as e:
         check("5 no presets + empty free list", False, f"exception: {e!r}")
 
-    # ---- 6. 爬蟲拋錯 → 200，不是 500 ----
+    # 爬蟲拋錯 → 200，不是 500
     set_state("none", None, free_models=[{"id": FREE_A}], free_raise=True)
     try:
         status, body = options(client)
@@ -280,7 +270,7 @@ def run_tests(client: httpx.Client, uid: uuid.UUID):
     finally:
         FREE_STATE["raise"] = False
 
-    # ---- 7. gemini_llm 無 GOOGLE_API_KEY 時可 import ----
+    # gemini_llm 無 GOOGLE_API_KEY 時可 import
     try:
         env_no_key = {k: v for k, v in os.environ.items() if k != "GOOGLE_API_KEY"}
         proc = subprocess.run(
@@ -292,7 +282,7 @@ def run_tests(client: httpx.Client, uid: uuid.UUID):
     except Exception as e:
         check("7a import gemini_llm without GOOGLE_API_KEY", False, f"exception: {e!r}")
 
-    # ---- 7b. 沒有金鑰時串流拋錯（不呼叫任何外部服務） ----
+    # 沒有金鑰時串流拋錯（不呼叫任何外部服務）
     saved_key = gemini_llm.GOOGLE_API_KEY
     gemini_llm.GOOGLE_API_KEY = None
     try:

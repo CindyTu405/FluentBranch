@@ -1,8 +1,6 @@
 @import "tailwindcss";
 
-/* E5 修正（P5b）：animate-in / fade-in / zoom-in-95 / duration-200 來自 v3 的
- * tailwindcss-animate 外掛，Tailwind v4 沒有對應樣式、完全沒有效果。
- * 改以原生 CSS keyframes 實作等效的「淡入 + 95%→100% 縮放進場」。 */
+/* 淡入 + 95%→100% 縮放進場（原生 keyframes，取代 Tailwind v4 沒有的 animate-in 類別）。 */
 @keyframes fade-zoom-in {
   from {
     opacity: 0;
@@ -18,9 +16,7 @@
   animation: fade-zoom-in 0.2s ease-out;
 }
 
-/* (L1-8) 分支面板開啟時由右往左滑入。只在掛載時播一次；動畫結束後不保留 transform
- * （不加 forwards），避免面板內 position: fixed 的子元素被 transform 影響定位。
- * 調整：0.28s 是滑入時間；translateX(100%) 是起點（100% = 整個面板寬度之外）。 */
+/* 分支面板由右往左滑入（只在掛載時播一次，不保留 transform，避免影響面板內 fixed 子元素）。 */
 @keyframes panel-slide-in {
   from {
     transform: translateX(100%);

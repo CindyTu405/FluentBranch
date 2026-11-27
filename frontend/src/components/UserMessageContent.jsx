@@ -5,13 +5,13 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { parseUserContent } from '../userContent';
 
-// (G9) 畫面上超過幾行就摺疊（可調；行數含自動折行，以文字行高計算）
+// 畫面上超過幾行就摺疊（可調；行數含自動折行，以文字行高計算）
 const MAX_LINES = 10;
-// (G9) 摺疊時漸層開始淡出的位置；數字越小，淡出範圍越大（可調）
+// 摺疊時漸層開始淡出的位置；數字越小，淡出範圍越大（可調）
 const FADE_START = '70%';
 const FADE_MASK = `linear-gradient(to bottom, black ${FADE_START}, transparent)`;
 
-// (G9) user 訊息內容：原樣顯示（保留換行），只認 ``` 區塊與 `行內` 程式碼；超過 MAX_LINES 行摺疊
+// user 訊息內容：原樣顯示（保留換行），只認 ``` 區塊與 `行內` 程式碼；超過 MAX_LINES 行摺疊
 // 注意：展開狀態放在這個元件自己的 state；MessageList 用訊息 id 當 key，切換對話時會重新建立、回到摺疊。
 export default function UserMessageContent({ content }) {
   const contentRef = useRef(null);
@@ -21,7 +21,7 @@ export default function UserMessageContent({ content }) {
   const [overflowing, setOverflowing] = useState(false);
   const [maxHeight, setMaxHeight] = useState(null);
 
-  // (G9) 量測：scrollHeight 是完整內容高度（即使被 max-height 擋住也量得到）
+  // 量測：scrollHeight 是完整內容高度（即使被 max-height 擋住也量得到）
   useEffect(() => {
     const el = contentRef.current;
     if (!el) return;
@@ -61,7 +61,7 @@ export default function UserMessageContent({ content }) {
       >
         {segments.map((seg, i) => {
           if (seg.type === 'fence') {
-            // whitespace-normal：程式碼區塊自己排版，不繼承外層的 pre-wrap
+            // 程式碼區塊不繼承外層的 pre-wrap
             return (
               <div key={i} className="whitespace-normal">
                 <SyntaxHighlighter
@@ -86,7 +86,7 @@ export default function UserMessageContent({ content }) {
               </code>
             );
           }
-          // (G9) 程式碼區塊本身已有 my-3 間距，緊貼區塊的那個換行要去掉，否則 pre-wrap 會多出一行空白
+          // 程式碼區塊已有 my-3 間距，緊貼區塊的換行要去掉，否則 pre-wrap 會多出空白行
           let text = seg.text;
           if (segments[i - 1]?.type === 'fence' && text.startsWith('\n')) text = text.slice(1);
           if (segments[i + 1]?.type === 'fence' && text.endsWith('\n')) text = text.slice(0, -1);
@@ -95,12 +95,12 @@ export default function UserMessageContent({ content }) {
         })}
       </div>
 
-      {/* (G9) 按鈕在被遮罩的內容外面（兄弟元素），不會跟著淡掉 */}
+      {/* 按鈕在被遮罩的內容外面（兄弟元素），不會跟著淡掉 */}
       {overflowing && (
         <button
           type="button"
           onClick={() => setExpanded((v) => !v)}
-          // (G9) 按下按鈕不啟動 G8 的長按計時器（長按事件掛在氣泡外層）
+          // 按下按鈕不啟動長按計時器（長按事件掛在氣泡外層）
           onPointerDown={(e) => e.stopPropagation()}
           aria-label={expanded ? '收起' : '展開'}
           aria-expanded={expanded}

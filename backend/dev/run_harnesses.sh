@@ -1,9 +1,6 @@
 #!/usr/bin/env bash
-# (CI-2) 依序跑完 9 支 harness；本機與 CI 共用。
-# 用法（只用臨時資料庫，不要指向 chat_db）：
-#     cd backend && POSTGRES_DB=g2_tmp ./dev/run_harnesses.sh
-# 資料庫由呼叫者決定（DATABASE_URL 或 POSTGRES_DB），這支腳本不設定。
-# 一支失敗不中斷，全部跑完；有任何失敗則結束碼 1。
+# 依序跑完所有 harness；本機與 CI 共用。一支失敗不中斷，任一失敗則結束碼 1。
+# 只用臨時資料庫，不要指向 chat_db：cd backend && POSTGRES_DB=g2_tmp ./dev/run_harnesses.sh
 set -u
 
 cd "$(dirname "$0")/.."

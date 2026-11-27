@@ -1,5 +1,5 @@
 // rehype 外掛：把每個 text node 包成 <span data-s data-e>，
-// 讓前端選取時能把 DOM 位置對映回原始 markdown 的字元 offset（DESIGN_P3 主題 1.2）。
+// 讓前端選取時能把 DOM 位置對映回原始 markdown 的字元 offset。
 // data-s / data-e 是該 text node 對應的 source 字元偏移（半開區間 [s, e)）。
 // 跳過 code / pre 內的文字：code block 由 SyntaxHighlighter 渲染，不能切碎。
 export default function rehypeSourceOffsets() {
@@ -24,7 +24,6 @@ export default function rehypeSourceOffsets() {
             },
           ];
         }
-        // 遞迴處理子節點
         wrap(child, childInCode);
         return [child];
       });
