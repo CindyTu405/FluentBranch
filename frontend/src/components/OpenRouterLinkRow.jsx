@@ -2,10 +2,9 @@ import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { apiFetch, API_URL } from '../api';
 
-// (G2-10) 側欄帳號區下方的 OpenRouter 列（只給已登入、非訪客使用；訪客不渲染此元件）
+// 側欄帳號區下方的 OpenRouter 列（只給已登入、非訪客使用；訪客不渲染此元件）
 // connected：user.openrouter_connected；onUserChanged：重新讀取 /auth/me
 export default function OpenRouterLinkRow({ connected, onUserChanged }) {
-  // 中斷連結的確認對話框與進行中狀態
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
@@ -54,7 +53,6 @@ export default function OpenRouterLinkRow({ connected, onUserChanged }) {
           <a href={`${API_URL}/auth/openrouter/connect`} className={secondaryLinkClass}>
             連結 OpenRouter
           </a>
-          {/* 說明文字換行顯示，不截斷 */}
           <p className="mt-1 text-xs text-gray-500 whitespace-normal break-words">
             連結後不限則數，可用任何模型，費用由你的 OpenRouter 帳號支付
           </p>
@@ -62,7 +60,7 @@ export default function OpenRouterLinkRow({ connected, onUserChanged }) {
       )}
 
       {confirming && createPortal(
-        // 用 Portal 掛到 body，避免手機版側欄（fixed 全螢幕、有自己的 z-index）把對話框困在裡面
+        // 用 Portal 掛到 body，避免被手機版側欄的 fixed 層與 z-index 困住
         <div className="fixed inset-0 z-[105] flex items-center justify-center p-4 bg-black/40">
           <div
             role="dialog"

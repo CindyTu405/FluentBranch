@@ -47,6 +47,6 @@ export function selectionOffsets(selection) {
   const start = sourceOffsetAt(range.startContainer, range.startOffset);
   const end = sourceOffsetAt(range.endContainer, range.endOffset);
   if (start === null || end === null) return null;
-  if (start === end) return null; // 空選取
+  if (start === end) return null;
   return start < end ? [start, end] : [end, start];
 }

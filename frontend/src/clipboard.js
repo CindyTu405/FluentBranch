@@ -1,4 +1,4 @@
-// (G8) 複製文字到剪貼簿。
+// 複製文字到剪貼簿。
 // 安全環境（https／localhost）用現代 Clipboard API；
 // 不是安全環境（例如手機用 http://區網IP 連開發伺服器）時，退回舊的複製指令（隱藏 textarea）。
 export async function copyText(text) {

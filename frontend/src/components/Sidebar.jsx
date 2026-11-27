@@ -5,12 +5,11 @@ import { FcGoogle } from 'react-icons/fc';
 import { FaGithub } from 'react-icons/fa';
 import { apiFetch } from '../api';
 import { formatDateTime, groupByTimeRange } from '../dateUtils';
-// (G2-10) 帳號區下方的 OpenRouter 列（僅已登入、非訪客）
+// 帳號區下方的 OpenRouter 列（僅已登入、非訪客）
 import OpenRouterLinkRow from './OpenRouterLinkRow';
 
 // 一列對話：左側載入按鈕 + 右側單一三點選單（分支圖／改名／刪除）
-// E4 修正：不再把 <div onClick> 巢狀在 <button> 內，操作項目改為真正的 <button>，
-// 可以用 Tab 聚焦、Enter／空白鍵觸發。
+// 操作項目是真正的 <button>（不巢狀在 <button> 內），可用 Tab 聚焦、Enter／空白鍵觸發。
 function ChatRow({
   activeChatId,
   chat,
@@ -21,7 +20,7 @@ function ChatRow({
   onStartRenaming,
   onDeleteChat,
 }) {
-  // ★ 根據排序模式決定要顯示哪一個時間戳記
+  // 根據排序模式決定要顯示哪一個時間戳記
   const targetTime = (sortBy === 'updated' && chat.last_activity)
     ? chat.last_activity
     : chat.created_at;
@@ -29,7 +28,7 @@ function ChatRow({
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef(null);
 
-  // (M1) 手機長按開選單：計時器、觸控起點、長按後略過下一次 click 的旗標、
+  // 手機長按開選單：計時器、觸控起點、長按後略過下一次 click 的旗標、
   // touch 期間擋掉 contextmenu 的旗標與其延遲清除計時器。全部用 ref，不觸發重新渲染。
   const longPressTimerRef = useRef(null);
   const touchStartRef = useRef({ x: 0, y: 0 });
@@ -54,7 +53,7 @@ function ChatRow({
     };
   }, [menuOpen]);
 
-  // (M1) unmount 時清掉長按與 contextmenu 延遲計時器
+  // unmount 時清掉長按與 contextmenu 延遲計時器
   useEffect(() => () => {
     clearTimeout(longPressTimerRef.current);
     clearTimeout(touchClearTimerRef.current);
@@ -65,7 +64,7 @@ function ChatRow({
     fn(e);
   };
 
-  // (M1) 長按計時：500ms 內移動超過 10px 或放開就取消
+  // 長按計時：500ms 內移動超過 10px 或放開就取消
   const LONG_PRESS_MS = 500;
   const LONG_PRESS_MOVE_PX = 10;
   const CONTEXT_CLEAR_MS = 300;
@@ -131,8 +130,7 @@ function ChatRow({
   // 目前開啟中的對話（isActive）保持同樣底色，點進去後不會因滑鼠離開而消失
   const isActive = chat.id === activeChatId;
 
-  // (M1) 三點外層樣式：選單開啟中同現狀；手機（< 768px）已選取的列常駐顯示，
-  // 未選取的列透明且 pointer-events-none（點不到）；桌面（md 以上）維持 hover 才顯示
+  // 三點選單外層：桌面 hover 才顯示；手機已選取的列常駐，未選取的列點不到（pointer-events-none）。
   const menuWrapClass = menuOpen
     ? 'z-50 opacity-100'
     : isActive
@@ -141,8 +139,7 @@ function ChatRow({
 
   return (
     <div className={`group relative rounded-xl transition-all ${isActive ? 'bg-white/80 shadow-sm' : 'hover:bg-white/80 hover:shadow-sm'}`}>
-      {/* (M1) 手機長按：觸控事件掛在主按鈕上；不呼叫 preventDefault，列表捲動不受影響。
-          select-none 讓長按不選到文字（子元素會繼承）；touch-callout 關掉 iOS 長按選單 */}
+      {/* 手機長按：觸控事件掛在主按鈕上，不 preventDefault，列表捲動不受影響 */}
       <button
         type="button"
         onClick={onRowClick}
@@ -153,7 +150,7 @@ function ChatRow({
         onContextMenu={onRowContextMenu}
         className="w-full text-left p-3 pr-2 rounded-xl cursor-pointer transition-all flex items-center gap-3 max-md:select-none [-webkit-touch-callout:none]"
       >
-        {/* ★★★ 判斷是否有分支來決定圖示（純顯示用，操作交給右側選單）★★★ */}
+        {/* 有分支時顯示分支圖示（純顯示，操作在右側選單） */}
         {chat.has_branch ? (
           <TbBinaryTree2
             className="w-4 h-4 text-[#228DCD] group-hover:text-[#7DB9DE] transition flex-shrink-0"
@@ -163,23 +160,20 @@ function ChatRow({
           <MessageSquare className="w-5 h-5 text-gray-500 group-hover:text-[#7DB9DE] transition flex-shrink-0" aria-hidden="true" />
         )}
         <span className="flex-1 min-w-0 w-full">
-          {/* ★★★ 優先顯示 Title，沒有才顯示 Content ★★★ */}
-          {/* P3b-F2：單行不換行、不用省略號。P3b-BugB：右端最後 3rem 用遮罩由左至右漸層透明，避開 ⋯ 按鈕 */}
+          {/* 優先顯示 title，沒有才顯示 content */}
+          {/* 單行截斷（不用省略號）；右端 3rem 用 mask-image 漸層淡出，避開 ⋯ 按鈕 */}
           <span className="block text-sm text-gray-700 group-hover:text-gray-900 whitespace-nowrap overflow-hidden transition font-medium [mask-image:linear-gradient(to_right,#000_calc(100%-4rem),transparent_100%)] [-webkit-mask-image:linear-gradient(to_right,#000_calc(100%-4rem),transparent_100%)]">
             {chat.title || chat.content}
           </span>
           <span className="block text-xs text-gray-500 truncate mt-0.5">
-            {/* 用共用工具解析 (後端回傳 UTC)，並依「使用者所在時區」顯示。
-                解析失敗時回傳空字串，避免畫面上出現 Invalid Date。 */}
+            {/* 依使用者時區顯示；解析失敗時回傳空字串，不會出現 Invalid Date */}
             {formatDateTime(targetTime)}
           </span>
         </span>
       </button>
 
-      {/* ★★★ 三點選單：預設隱藏，滑過或聚焦時浮現；展開時保持可見 ★★★ */}
-      {/* P3b-F2-fix2：外層容器本身是 absolute（已建立定位），選單展開時把它的 z-index 拉到
-          50，才會蓋過 sticky 的分組標題（h3 z-10）。未展開時不開新的堆疊層級，避免影響其他列的滑過效果。
-          (M1) 樣式依 menuWrapClass：手機版已選取的列常駐、未選取的列點不到（見上方 menuWrapClass）。 */}
+      {/* 三點選單：預設隱藏，滑過或聚焦時浮現；展開時保持可見 */}
+      {/* 選單展開時拉高 z-index 蓋過 sticky 分組標題（h3 z-10）；手機版樣式依 menuWrapClass */}
       <div
         ref={menuRef}
         className={`absolute right-2 top-1/2 -translate-y-1/2 ${menuWrapClass} transition-opacity`}
@@ -253,7 +247,7 @@ function ChatRenameRow({
         className="flex-1 bg-transparent text-sm text-gray-800 outline-none min-w-0"
         value={renameInput}
         onChange={(e) => setRenameInput(e.target.value)}
-        maxLength={200} // (B13) 與後端 MAX_TITLE_CHARS 一致
+        maxLength={200} // 與後端 MAX_TITLE_CHARS 一致
         autoFocus
         onKeyDown={(e) => {
           if (e.key === 'Enter') onSubmitRename(e);
@@ -291,17 +285,17 @@ function Sidebar({
   onStartRenaming,
   onSubmitRename,
   onCloseSidebar,
-  onRequestLogin, // (G2-6) 訪客按「登入」時呼叫，由 AuthGate 顯示登入頁
-  onUserChanged, // (G2-10) 連結／中斷 OpenRouter 後重新讀取 /auth/me
-  onGoHome, // (L1-12) 訪客按「回首頁」時呼叫（AuthGate 以 history.back() 回到首頁）
+  onRequestLogin, // 訪客按「登入」時呼叫，由 AuthGate 顯示登入頁
+  onUserChanged, // 連結／中斷 OpenRouter 後重新讀取 /auth/me
+  onGoHome, // 訪客按「回首頁」時呼叫（AuthGate 以 history.back() 回到首頁）
 }) {
-  // P5a：時間軸分組跟著當前排序走（updated → last_activity，created → created_at）
+  // 時間軸分組跟著當前排序走（updated → last_activity，created → created_at）
   const timeGroups = useMemo(
     () => groupByTimeRange(historyList, sortBy),
     [historyList, sortBy]
   );
 
-  // P3b-F2：側邊欄寬度可拖曳，以「視窗寬度百分比」儲存（12% ~ 30%），並記在 localStorage。
+  // 側邊欄寬度可拖曳，以「視窗寬度百分比」儲存（12% ~ 30%），並記在 localStorage。
   const SIDEBAR_PCT_KEY = 'ctchat.sidebarWidthPct';
   const SIDEBAR_PCT_MIN = 12;
   const SIDEBAR_PCT_MAX = 30;
@@ -319,7 +313,7 @@ function Sidebar({
     return SIDEBAR_PCT_DEFAULT;
   });
   const [isResizing, setIsResizing] = useState(false);
-  // P3b-F5：手機（< 768px）不套用 inline 百分比寬度，改由 fixed 滿版 class 決定
+  // 手機（< 768px）不套用 inline 百分比寬度，改由 fixed 滿版 class 決定
   const [isDesktop, setIsDesktop] = useState(() => window.matchMedia('(min-width: 768px)').matches);
   useEffect(() => {
     const mq = window.matchMedia('(min-width: 768px)');
@@ -373,7 +367,7 @@ function Sidebar({
     setIsResizing(true);
   };
 
-  // (S-U1-7) 帳號區：email 為 null 時用 provider 名稱當後備
+  // 帳號區：email 為 null 時用 provider 名稱當後備
   const accountLabel =
     user?.email || (user?.provider === 'github' ? 'GitHub 帳號' : 'Google 帳號');
   const [loggingOut, setLoggingOut] = useState(false);
@@ -389,18 +383,13 @@ function Sidebar({
   };
 
   return (
-    // --- 左側側邊欄 ---
-    // 套用指定的更淺灰藍色 #E8F1F5
-    // P5b-fix（B2）：加上 overflow-hidden，收起（w-0）時內容不再溢出到主畫面、不攔截觸控
-    // P3b-F2：寬度改用 inline style 的百分比（預設 20%，可拖曳 12%~30%），展開時才套用；
-    // transition 只在收合/展開時生效，拖曳中關掉避免延遲感。
-    // P3b-F5：手機（< 768px）改為滿版 drawer（fixed 覆蓋全螢幕）；收起時 hidden。
-    // 桌面（md 以上）維持原本的推擠式側欄與百分比寬度。
+    // 手機（< 768px）為滿版 drawer（收起時 hidden）；桌面為推擠式側欄，寬度為可拖曳百分比（inline style）。
+    // overflow-hidden 讓收起（w-0）時內容不溢出、不攔截觸控；拖曳中關掉 transition 避免延遲。
     <aside
       style={sidebarOpen && isDesktop ? { width: `${sidebarPct}%`, minWidth: 0 } : undefined}
       className={`${sidebarOpen ? 'flex fixed inset-0 z-40 w-full md:relative md:z-auto' : 'hidden md:flex md:w-0'} bg-[#E8F1F5] border-r border-gray-300 flex-col flex-shrink-0 overflow-hidden ${isResizing ? '' : 'transition-[width] duration-300'}`}
     >
-      {/* P3b-F5：手機版左上 X 關閉（桌面不顯示） */}
+      {/* 手機版左上 X 關閉（桌面不顯示） */}
       {sidebarOpen && (
         <button
           onClick={onCloseSidebar}
@@ -410,7 +399,7 @@ function Sidebar({
           <X className="w-5 h-5" />
         </button>
       )}
-      {/* P3b-F2：右側邊界的細拖曳把手（col-resize），只在展開時可拖 */}
+      {/* 右側邊界的細拖曳把手（col-resize），只在展開時可拖 */}
       {sidebarOpen && (
         <div
           role="separator"
@@ -433,7 +422,6 @@ function Sidebar({
         </button>
       </div>
 
-      {/* 歷史紀錄標題與排序按鈕 */}
       <div className="px-4 py-2 flex items-center justify-between">
         <div className="text-xs font-bold text-gray-500 uppercase tracking-wider">
           Recent
@@ -448,9 +436,7 @@ function Sidebar({
         </button>
       </div>
 
-      {/* 列表區域：依時間軸分組，群組標題 sticky
-          E5 修正：scrollbar-thin / scrollbar-thumb-gray-300 是 v3 外掛 class，Tailwind v4 無效，
-          改寫成等效的原生屬性寫法（Firefox 用 scrollbar-width/color，WebKit 用偽元素變體）。 */}
+      {/* 列表區域：依時間軸分組，群組標題 sticky；捲軸用原生屬性（Tailwind v4 沒有 scrollbar-thin 類別） */}
       <div className="flex-1 min-h-0 relative">
         <div
           className="h-full overflow-y-auto px-2 pb-2 [scrollbar-width:thin] [scrollbar-color:#d1d5db_transparent] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-gray-300"
@@ -491,9 +477,9 @@ function Sidebar({
         </div>
       </div>
 
-      {/* (S-U1-7) 帳號區：固定在側欄底部、不在捲動列表內；底部用 max() 補手機安全區，避免被瀏覽器工具列蓋住 */}
+      {/* 帳號區：固定在側欄底部、不在捲動列表內；底部用 max() 補手機安全區，避免被瀏覽器工具列蓋住 */}
       <div className="mt-auto flex-shrink-0 px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] border-t border-gray-300 bg-[#E8F1F5]">
-        {/* (G2-6) 訪客：顯示「試用中」與「登入」，不顯示登出 */}
+        {/* 訪客：顯示「試用中」與「登入」，不顯示登出 */}
         {user?.is_guest ? (
           <>
             <div className="flex items-center gap-2 min-h-[2.5rem]">
@@ -532,14 +518,14 @@ function Sidebar({
             登出
           </button>
         </div>
-        {/* (G2-10) OpenRouter 列放在帳號列下方；收合時 aside 為 w-0 + overflow-hidden，與帳號列一樣被裁掉 */}
+        {/* OpenRouter 列放在帳號列下方；收合時 aside 為 w-0 + overflow-hidden，與帳號列一樣被裁掉 */}
         <OpenRouterLinkRow
           connected={user?.openrouter_connected === true}
           onUserChanged={onUserChanged}
         />
         </>
         )}
-        {/* (L1-12) 訪客才有「回首頁」，放在「隱私權說明」左邊；登入的使用者只有隱私權說明，外觀不變 */}
+        {/* 訪客才有「回首頁」，放在「隱私權說明」左邊；登入的使用者只有隱私權說明 */}
         <div className="flex items-center gap-3 pl-7">
           {user?.is_guest && (
             <button

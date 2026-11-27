@@ -6,11 +6,9 @@ import { TbBinaryTree2 } from 'react-icons/tb';
 
 import { apiFetch } from './api';
 
-// ============================================================
-// (P2-7) 自訂排版：主幹垂直、分支向右
-// ============================================================
+// 自訂排版：主幹垂直、分支向右
 
-const NODE_W = 256;              // 節點固定寬度 (w-64)
+const NODE_W = 256;              // 節點固定寬度
 const TRUNK_X = 0;               // 主幹脊柱的 x（固定）
 const TRUNK_GAP_Y = 24;          // 主幹節點之間的垂直間距
 const BRANCH_GAP_X = 72;         // 主幹右緣 → 第一欄分支的距離
@@ -21,8 +19,7 @@ const BRANCH_MAX_COLS = 4;       // 一條分支每一列最多放幾則，超�
 const TRUNK_EDGE_COLOR = '#64748b';   // 主幹連線（實線、石板灰）
 const BRANCH_EDGE_COLOR = '#f59e0b';  // 分支連線（虛線、琥珀色）
 
-// 所有「水平」連接點（right / left / right-in / left-out）都必須落在同一個高度，
-// 否則同一條橫向分支邊會從節點右/左緣的不同高度出發，看起來像隨機跳動。
+// 所有水平連接點都必須落在同一高度（HORIZONTAL_HANDLE_TOP），否則橫向分支邊會從不同高度出發。
 const HORIZONTAL_HANDLE_TOP = '50%';
 
 // 主幹 = branch_id 為 null 或 undefined（後端用 NULL 表示主幹）
@@ -40,7 +37,7 @@ const estimateNodeHeight = (content = '') => {
   return 60 + lines * 20;
 };
 
-// --- 1. 自訂節點外觀：主幹實色框、分支虛線淡化框 ---
+// 自訂節點外觀：主幹實色框、分支虛線淡化框
 const CustomMessageNode = ({ data }) => {
   const isUser = data.role === 'user';
   const isTrunk = isTrunkBranch(data.branch_id);
@@ -74,7 +71,6 @@ const CustomMessageNode = ({ data }) => {
       <Handle id="right-in" type="target" position={Position.Right} isConnectable={false}
         style={{ top: HORIZONTAL_HANDLE_TOP }} className="w-1.5 h-1.5 bg-gray-400 border-none" />
 
-      {/* 標題與 Icon 區塊 */}
       <div className={`flex items-center gap-2 mb-2 border-b pb-1 ${headerBorder}`}>
         {isUser ? (
           <User className={`w-4 h-4 ${iconColor}`} />
@@ -91,7 +87,6 @@ const CustomMessageNode = ({ data }) => {
         )}
       </div>
 
-      {/* 文字預覽內容 3 行 */}
       <div className={`text-sm line-clamp-3 whitespace-pre-wrap break-words ${
         isTrunk ? (isUser ? 'text-white' : 'text-gray-800') : 'text-slate-600'
       }`}>
@@ -110,7 +105,7 @@ const CustomMessageNode = ({ data }) => {
 
 const nodeTypes = { custom: CustomMessageNode };
 
-// --- 2. 排版引擎 ---
+// 排版引擎
 // 主幹：x 固定，y 依 created_at 遞增往下排成脊柱。
 // 分支：依 branch_id 分組，從 anchor_message_id 的座標往右偏移後橫向延伸；
 //       超過 BRANCH_MAX_COLS 則蛇行換列，同一錨點上的多條分支再往下錯開。
@@ -122,7 +117,6 @@ const getLayoutedElements = (nodes, edges) => {
   const pos = new Map();   // id -> { x, y, w, h }
   const placed = [];       // 已佔用的矩形，用來避免分支互撞
 
-  // --- 2-1. 主幹脊柱 ---
   const trunkNodes = nodes.filter((n) => isTrunkBranch(n.data.branch_id)).sort(byCreatedAt);
   let trunkCursorY = 0;
   trunkNodes.forEach((node) => {
@@ -133,7 +127,6 @@ const getLayoutedElements = (nodes, edges) => {
     trunkCursorY += h + TRUNK_GAP_Y;
   });
 
-  // --- 2-2. 分支：依 branch_id 分組 ---
   const groups = new Map();
   nodes
     .filter((n) => !isTrunkBranch(n.data.branch_id))
@@ -225,7 +218,6 @@ const getLayoutedElements = (nodes, edges) => {
     });
   });
 
-  // --- 2-3. 套用座標 ---
   const layoutedNodes = nodes.map((node) => {
     const p = pos.get(node.id) || { x: 0, y: 0 };
     return {
@@ -239,7 +231,7 @@ const getLayoutedElements = (nodes, edges) => {
     };
   });
 
-  // --- 2-4. 邊線：連 parent → child，依「主幹 / 分支」給不同顏色與線型 ---
+  // 邊線：連 parent → child，依「主幹 / 分支」給不同顏色與線型
   const branchIds = new Set(
     nodes.filter((n) => !isTrunkBranch(n.data.branch_id)).map((n) => n.id)
   );
@@ -275,7 +267,6 @@ const getLayoutedElements = (nodes, edges) => {
   return { nodes: layoutedNodes, edges: layoutedEdges };
 };
 
-// --- 3. 主元件 ---
 export default function BranchTreeModal({ isOpen, onClose, rootId, onSelectNode }) {
   const [nodes, setNodes] = useState([]);
   const [edges, setEdges] = useState([]);
@@ -294,7 +285,6 @@ export default function BranchTreeModal({ isOpen, onClose, rootId, onSelectNode 
         const res = await apiFetch(`/chats/${rootId}/tree`);
         const data = await res.json();
 
-        // 轉換資料給 React Flow 看
         const initialNodes = [];
         const initialEdges = [];
 
@@ -347,23 +337,20 @@ export default function BranchTreeModal({ isOpen, onClose, rootId, onSelectNode 
     fetchTreeData();
   }, [isOpen, rootId]);
 
-  // ==========================================
-  // ★ 新增：監聽 Esc 鍵關閉彈出視窗的邏輯
-  // ==========================================
+  // 監聽 Esc 鍵關閉彈出視窗
   useEffect(() => {
     // 如果視窗沒打開，就不用浪費效能去監聽鍵盤
     if (!isOpen) return;
 
     const handleKeyDown = (e) => {
       if (e.key === 'Escape') {
-        onClose(); // 呼叫關閉視窗的方法
+        onClose();
       }
     };
 
-    // 綁定鍵盤事件
     window.addEventListener('keydown', handleKeyDown);
 
-    // 組件關閉或卸載時，把監聽器清掉（好習慣，避免記憶體洩漏）
+    // 關閉或卸載時移除監聽器
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
@@ -372,20 +359,16 @@ export default function BranchTreeModal({ isOpen, onClose, rootId, onSelectNode 
   if (!isOpen) return null;
 
   return (
-    // 黑底半透明背景
     <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center backdrop-blur-sm p-4 md:p-10"
       onClick={(e) => {
-          // 關鍵：如果點擊的目標 (e.target) 是這個背景層本身 (e.currentTarget)
-          // 代表使用者點在視窗外面，我們就呼叫 onClose() 關閉視窗
+          // 只有點在背景層本身（e.target === e.currentTarget）時才關閉，點到視窗內容不關
           if (e.target === e.currentTarget) {
             onClose();
           }
         }}
     >
-      {/* 彈出視窗本體 */}
       <div className="bg-[#E8F1F5] w-full h-full max-w-6xl rounded-2xl shadow-2xl flex flex-col overflow-hidden relative animate-fade-zoom-in">
         
-        {/* 頂部標題列 */}
         <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between bg-gray-50 z-10">
           
           <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2 flex-wrap">
@@ -405,7 +388,6 @@ export default function BranchTreeModal({ isOpen, onClose, rootId, onSelectNode 
           </button>
         </div>
 
-        {/* React Flow 畫布區 */}
         <div className="flex-1 w-full bg-gray-50/50">
           {isLoading ? (
             <div className="w-full h-full flex items-center justify-center text-gray-500">載入樹狀圖中...</div>
@@ -419,7 +401,7 @@ export default function BranchTreeModal({ isOpen, onClose, rootId, onSelectNode 
               // 當點擊某個節點時，觸發 onSelectNode (回到主要對話畫面)
               onNodeClick={(event, node) => {
                 onSelectNode(node.id);
-                onClose(); // 關閉彈出視窗
+                onClose();
               }}
               fitView // 自動縮放讓整棵樹都在畫面內
               fitViewOptions={{ padding: 0.18 }}

@@ -1,4 +1,4 @@
-// 第 1–2 條：首頁試用進入聊天、送出兩則訊息（API 全部由 mockApi 假造）
+// 首頁試用進入聊天、送出兩則訊息（API 全部由 mockApi 假造）
 import { test, expect } from '@playwright/test';
 import { mockApi, expectNoUnhandled, guestUser, chatReply } from './mockApi';
 import { mainInput, sendButton } from './locators';

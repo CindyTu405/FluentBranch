@@ -1,4 +1,4 @@
-// (L1-1) 落地頁示範文章資料：答案內以 [[...]] 標記可追問的段落，parseArticle 會去掉標記並算出段落位置
+// 落地頁示範文章資料：答案內以 [[...]] 標記可追問的段落，parseArticle 會去掉標記並算出段落位置
 const RAW =
 [
   {
@@ -104,10 +104,10 @@ const RAW =
 ]
 ;
 
-// (L1-1) 示範用的通用回答，非示範段落的追問時顯示
+// 示範用的通用回答，非示範段落的追問時顯示
 export const DEMO_GENERIC_ANSWER = '這是示範，回答是預先寫好的。按「開始使用」就能針對任何段落真的追問。';
 
-// (L1-1) 把單篇原始資料轉成前端用格式：去掉 [[ ]] 標記，並記錄每段在去標記後答案中的 [start, end) 位置
+// 把單篇原始資料轉成前端用格式：去掉 [[ ]] 標記，並記錄每段在去標記後答案中的 [start, end) 位置
 export function parseArticle(raw) {
   const opens = raw.answer.split('[[').length - 1;
   const closes = raw.answer.split(']]').length - 1;
@@ -145,5 +145,5 @@ export function parseArticle(raw) {
   };
 }
 
-// (L1-1) 匯出給落地頁使用的示範文章列表
+// 匯出給落地頁使用的示範文章列表
 export const DEMO_ARTICLES = RAW.map(parseArticle);
