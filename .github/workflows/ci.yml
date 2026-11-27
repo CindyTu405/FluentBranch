@@ -1,5 +1,4 @@
-# (CI-3)(E2E-3) 每次 push 與對 main 的 PR 自動跑後端 harness、前端 build 與前端 e2e 測試。
-# 不使用任何 secret；harness 用假模型與假登入，不呼叫真的 Gemini / OpenRouter。
+# 不用任何 secret，harness 用假模型與假登入
 name: CI
 
 on:
@@ -24,7 +23,7 @@ jobs:
         env:
           POSTGRES_USER: ci
           POSTGRES_PASSWORD: ci
-          # openrouter_connect_harness 只允許 g2_tmp；guest_harness 拒絕 chat_db
+          # harness 需要 g2_tmp：openrouter_connect 只允許 g2_tmp，guest 拒絕 chat_db
           POSTGRES_DB: g2_tmp
         ports:
           - 5432:5432
@@ -34,13 +33,12 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     env:
-      # 這組帳密只存在這台臨時機器上，跑完即銷毀
+      # 臨時 CI 帳密，只存在於這台機器
       DATABASE_URL: postgresql://ci:ci@localhost:5432/g2_tmp
       SQL_ECHO: "false"
-      # CI 沒有 .env：openrouter_llm.py 在 import 時建立 client，沒有金鑰會直接報錯。
-      # 以下都是假值，harness 用假模型與假登入，不會連到真的服務。
+      # 假金鑰：openrouter_llm.py 在 import 時建立 client，缺金鑰會報錯
       OPENROUTER_API_KEY: ci-dummy-not-a-real-key
-      # quota_harness 第 11 案直接呼叫 gemini_chat_stream（SDK 已換成假的），沒有金鑰會在函式開頭報錯
+      # quota_harness 直接呼叫 gemini_chat_stream，缺金鑰會在函式開頭報錯
       GOOGLE_API_KEY: ci-dummy-not-a-real-key
       GOOGLE_CLIENT_ID: ci-dummy-google-client-id
       GOOGLE_CLIENT_SECRET: ci-dummy-google-client-secret
@@ -97,7 +95,7 @@ jobs:
         run: npm ci
       - name: Install Playwright browser
         run: npx playwright install --with-deps chromium
-      # 後端全部用假回應（e2e/mockApi.js），不需要資料庫與任何金鑰
+      # e2e 用假 API（e2e/mockApi.js），不需資料庫或金鑰
       - name: Run e2e tests
         run: npm run test:e2e
       - name: Upload Playwright report

@@ -10,7 +10,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    # 不開 ports,只有 compose 內部網路能連
+    # 不開 ports，僅 compose 內部網路可連
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 5s
@@ -43,7 +43,7 @@ services:
       - GUEST_IP_DAILY_MESSAGES=${GUEST_IP_DAILY_MESSAGES:-100}
       - GUEST_RETENTION_DAYS=${GUEST_RETENTION_DAYS:-7}
       - IP_HASH_SECRET=${IP_HASH_SECRET:-}
-      # (G2-10) OpenRouter 金鑰加密用（Fernet）；不設預設值，只放在 VM 的 .env，絕不進版控
+      # 不設預設值，只放 VM 的 .env，絕不進版控
       - CREDENTIAL_ENCRYPTION_KEY=${CREDENTIAL_ENCRYPTION_KEY:-}
       - MAX_OUTPUT_TOKENS=${MAX_OUTPUT_TOKENS:-3000}
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
@@ -53,7 +53,7 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    # 不開 ports,由 nginx 代理
+    # 不開 ports，由 nginx 代理
     logging:
       driver: json-file
       options:
