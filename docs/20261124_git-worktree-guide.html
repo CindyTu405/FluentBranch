@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>git worktree 教學 — CT-Chat-Router</title>
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --card: #ffffff;
+    --ink: #1a2233;
+    --muted: #5a6474;
+    --accent: #2563eb;
+    --accent-soft: #e8f0fe;
+    --code-bg: #1e293b;
+    --code-ink: #e2e8f0;
+    --tip: #0f766e;
+    --tip-bg: #ecfdf5;
+    --warn: #b45309;
+    --warn-bg: #fffbeb;
+    --border: #e5e9f0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans TC", "Microsoft JhengHei", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.75; font-size: 16px;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 24px 16px 80px; }
+  header.hero {
+    background: linear-gradient(135deg, #1e3a8a, #2563eb); color: #fff;
+    border-radius: 16px; padding: 36px 32px; margin-bottom: 28px;
+  }
+  header.hero h1 { margin: 0 0 8px; font-size: 30px; letter-spacing: .5px; }
+  header.hero p { margin: 0; opacity: .9; font-size: 17px; }
+  .badge {
+    display: inline-block; background: rgba(255,255,255,.18); border: 1px solid rgba(255,255,255,.35);
+    padding: 2px 12px; border-radius: 999px; font-size: 13px; margin-bottom: 12px;
+  }
+  section.card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+    padding: 26px 28px; margin-bottom: 22px; box-shadow: 0 1px 3px rgba(16,24,40,.05);
+  }
+  h2 { font-size: 22px; margin: 0 0 14px; padding-bottom: 10px; border-bottom: 2px solid var(--accent-soft); }
+  h2 .num {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px; border-radius: 8px; background: var(--accent); color: #fff;
+    font-size: 15px; margin-right: 10px; vertical-align: 2px;
+  }
+  h3 { font-size: 17px; margin: 22px 0 8px; color: #0f172a; }
+  p { margin: 10px 0; }
+  code {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    background: #eef2f7; padding: 2px 6px; border-radius: 5px; font-size: .9em; color: #0f172a;
+    overflow-wrap: anywhere;
+  }
+  pre {
+    background: var(--code-bg); color: var(--code-ink); padding: 16px 18px;
+    border-radius: 10px; overflow-x: auto; font-size: 13.5px; line-height: 1.6;
+  }
+  pre code { background: none; color: inherit; padding: 0; font-size: inherit; overflow-wrap: normal; }
+  .cm { color: #8b98ab; }
+  .tip, .warn { border-radius: 10px; padding: 14px 18px; margin: 16px 0; font-size: 15px; }
+  .tip { background: var(--tip-bg); border-left: 4px solid var(--tip); }
+  .warn { background: var(--warn-bg); border-left: 4px solid var(--warn); }
+  .tip b { color: var(--tip); }
+  .warn b { color: var(--warn); }
+  .tablewrap { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; margin: 14px 0; font-size: 14.5px; }
+  th, td { border: 1px solid var(--border); padding: 9px 12px; text-align: left; vertical-align: top; }
+  th { background: #f1f5f9; font-weight: 600; }
+  ul, ol { padding-left: 22px; }
+  li { margin: 6px 0; }
+  .flow { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 10px; margin: 16px 0; }
+  .flow .box {
+    background: var(--accent-soft); border: 1px solid #c7dbff; color: #1e3a8a;
+    border-radius: 10px; padding: 10px 16px; font-weight: 600; font-size: 14.5px; text-align: center;
+  }
+  .flow .arrow { font-size: 22px; color: var(--accent); font-weight: 700; }
+  .muted { color: var(--muted); font-size: 14px; }
+  figure { margin: 18px 0; }
+  figure svg { width: 100%; height: auto; display: block; }
+  figcaption { color: var(--muted); font-size: 14px; text-align: center; margin-top: 6px; }
+  @media (max-width: 600px) {
+    section.card { padding: 20px 16px; }
+    header.hero { padding: 26px 20px; }
+    header.hero h1 { font-size: 24px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <span class="badge">CT-Chat-Router · Git 教學</span>
+    <h1>git worktree：同一個 repo，同時開好幾個工作資料夾</h1>
+    <p>以 <code style="background:rgba(255,255,255,.2);color:#fff">.claude/worktrees/s-u1</code> 為例，說明它是什麼、怎麼來的、在這個專案要注意什麼，以及怎麼安全刪掉。</p>
+  </header>
+
+  <section class="card">
+    <h2><span class="num">1</span>一句話解釋</h2>
+    <p><b>worktree = 共用同一個 <code>.git</code>，但另外多開一個資料夾，在那裡 checkout 另一條分支。</b></p>
+    <p>平常一個 repo 只有一個工作資料夾，要換分支就得 <code>git switch</code>，手上的修改要先 commit 或 stash。有了 worktree，兩條分支可以<b>各自待在自己的資料夾裡同時存在</b>，互不打擾。</p>
+    <pre><code><span class="cm"># 你剛才看到的</span>
+$ git worktree list
+.../ai-chat-backend                         918a8cf [feat/landing-back]
+.../ai-chat-backend/.claude/worktrees/s-u1  feed2bb [feat/s-u1-9]</code></pre>
+    <p class="muted">第一行是「主 worktree」（就是 repo 本身），第二行是額外開的 worktree。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">2</span>平常的 git vs. 有 worktree</h2>
+
+    <figure>
+      <svg viewBox="0 0 800 330" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system, 'Noto Sans TC', sans-serif">
+        <!-- left: normal -->
+        <text x="190" y="28" text-anchor="middle" font-size="17" font-weight="700" fill="#1a2233">平常：一個資料夾</text>
+        <rect x="40" y="48" width="300" height="250" rx="14" fill="#f1f5f9" stroke="#cbd5e1"/>
+        <text x="60" y="76" font-size="14" fill="#5a6474">ai-chat-backend/</text>
+        <rect x="70" y="92" width="240" height="70" rx="10" fill="#e8f0fe" stroke="#93b4f5"/>
+        <text x="190" y="120" text-anchor="middle" font-size="15" font-weight="700" fill="#1e3a8a">工作檔案</text>
+        <text x="190" y="143" text-anchor="middle" font-size="13" fill="#1e3a8a">一次只能是一條分支</text>
+        <rect x="70" y="200" width="240" height="70" rx="10" fill="#1e293b"/>
+        <text x="190" y="228" text-anchor="middle" font-size="15" font-weight="700" fill="#e2e8f0">.git/</text>
+        <text x="190" y="251" text-anchor="middle" font-size="13" fill="#94a3b8">所有 commit、分支</text>
+        <line x1="190" y1="162" x2="190" y2="200" stroke="#2563eb" stroke-width="2.5"/>
+
+        <!-- right: worktree -->
+        <text x="600" y="28" text-anchor="middle" font-size="17" font-weight="700" fill="#1a2233">有 worktree：兩個資料夾</text>
+        <rect x="420" y="48" width="170" height="120" rx="12" fill="#e8f0fe" stroke="#93b4f5"/>
+        <text x="505" y="78" text-anchor="middle" font-size="13" fill="#5a6474">ai-chat-backend/</text>
+        <text x="505" y="108" text-anchor="middle" font-size="15" font-weight="700" fill="#1e3a8a">工作檔案 A</text>
+        <text x="505" y="132" text-anchor="middle" font-size="13" fill="#1e3a8a">feat/landing-back</text>
+        <rect x="610" y="48" width="170" height="120" rx="12" fill="#ecfdf5" stroke="#6ee7b7"/>
+        <text x="695" y="78" text-anchor="middle" font-size="13" fill="#5a6474">.claude/worktrees/s-u1/</text>
+        <text x="695" y="108" text-anchor="middle" font-size="15" font-weight="700" fill="#0f766e">工作檔案 B</text>
+        <text x="695" y="132" text-anchor="middle" font-size="13" fill="#0f766e">feat/s-u1-9</text>
+        <rect x="480" y="220" width="240" height="78" rx="10" fill="#1e293b"/>
+        <text x="600" y="250" text-anchor="middle" font-size="15" font-weight="700" fill="#e2e8f0">同一個 .git/</text>
+        <text x="600" y="274" text-anchor="middle" font-size="13" fill="#94a3b8">commit 互相看得到</text>
+        <line x1="505" y1="168" x2="560" y2="220" stroke="#2563eb" stroke-width="2.5"/>
+        <line x1="695" y1="168" x2="640" y2="220" stroke="#0f766e" stroke-width="2.5"/>
+      </svg>
+      <figcaption>資料庫（.git）只有一份；變多的是「放檔案的地方」。</figcaption>
+    </figure>
+
+    <h3>跟「再 clone 一份」有什麼不同？</h3>
+    <div class="tablewrap"><table>
+      <tr><th></th><th>再 clone 一份</th><th>git worktree</th></tr>
+      <tr><td>.git 歷史</td><td>複製一份，各自獨立</td><td>共用同一份</td></tr>
+      <tr><td>在 B commit，A 看得到嗎？</td><td>要 push / pull 才看得到</td><td>立刻看得到（同一個資料庫）</td></tr>
+      <tr><td>同一條分支開兩處</td><td>可以（但容易分岔）</td><td>git 不允許，會擋下來</td></tr>
+      <tr><td>佔用空間</td><td>整份歷史再一份</td><td>只多工作檔案</td></tr>
+    </table></div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">3</span>它在這個專案是怎麼來的</h2>
+    <h3>位置是誰決定的</h3>
+    <p>worktree 是 git 本身的功能，<b>git 不限制它放在哪裡</b>：<code>git worktree add &lt;路徑&gt;</code> 的路徑隨你指定，git 只在 <code>.git/worktrees/&lt;名字&gt;/</code> 登記它。手動開的話，常見做法是放在 repo 旁邊（例如 <code>../ai-chat-backend-xxx</code>），這樣就不會變成「repo 裡又包了一個 repo」。</p>
+    <p><code>.claude/worktrees/&lt;名字&gt;/</code> 這個位置符合 Claude Code 開 worktree 的慣例，所以 <code>s-u1</code> 很可能是某個 Claude Code session 開的。不過沒有任何紀錄能證明是誰建的，這一點是推測。</p>
+
+    <h3>它經歷了什麼（從 git 歷史還原）</h3>
+    <p><code>PLAN_v2.md</code> 的 S-U1 規格寫著：在 <code>feat/s-u1-user-ownership</code> 開發，<b>其他 session 共用此資料夾時改用 worktree</b>。目的是讓兩邊的修改不會互相覆蓋同一批檔案。</p>
+    <div class="tablewrap"><table>
+      <tr><th>時間</th><th>發生什麼事</th><th>依據</th></tr>
+      <tr><td>11/05 16:35</td><td><code>s-u1</code> 資料夾建立</td><td>資料夾內檔案的建立時間</td></tr>
+      <tr><td>11/05 16:38–19:18</td><td>S-U1-1～7 在 <code>feat/s-u1-user-ownership</code> 上完成</td><td>commit 時間</td></tr>
+      <tr><td>11/05 20:14</td><td><code>feat/s-u1-user-ownership</code> merge 進 main</td><td>main 的 reflog</td></tr>
+      <tr><td>11/05 23:13 之後</td><td>從 main 的 <code>9657753</code> 建出 <code>feat/s-u1-9</code>，<code>s-u1</code> 換到這條分支</td><td><code>git reflog show feat/s-u1-9</code>：<code>Created from main</code></td></tr>
+      <tr><td>11/06 11:12–11:14</td><td>在 <code>s-u1</code> 裡 commit 兩次（S-U1-9）</td><td>commit 時間</td></tr>
+      <tr><td>11/06 11:31</td><td><code>feat/s-u1-9</code> merge 進 main</td><td>main 的 reflog</td></tr>
+    </table></div>
+    <p class="muted">資料夾比 <code>feat/s-u1-9</code> 早出現了大半天，所以它一開始應該是給 <code>feat/s-u1-user-ownership</code> 用的，後來同一個資料夾換了分支繼續用。這是從時間推出來的；worktree 的 HEAD 紀錄已隨 <code>git worktree remove</code> 刪除，無法再直接查證。</p>
+
+    <div class="flow">
+      <div class="box">11/05<br>建 worktree s-u1</div>
+      <div class="arrow">→</div>
+      <div class="box">換到<br>feat/s-u1-9</div>
+      <div class="arrow">→</div>
+      <div class="box">11/06<br>commit 兩次</div>
+      <div class="arrow">→</div>
+      <div class="box">merge 進 main</div>
+      <div class="arrow">→</div>
+      <div class="box" style="background:#fffbeb;border-color:#fcd34d;color:#92400e">之後<br>資料夾一直沒清</div>
+    </div>
+    <p class="muted">刪除前已確認：<code>git log main..feat/s-u1-9</code> 是空的，代表全部都已經進了 main；worktree 裡也沒有未提交的修改。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">4</span>拆開來看：s-u1 裡面有什麼</h2>
+    <figure>
+      <svg viewBox="0 0 800 300" xmlns="http://www.w3.org/2000/svg" font-family="ui-monospace, Menlo, Consolas, monospace">
+        <rect x="20" y="20" width="420" height="260" rx="12" fill="#f8fafc" stroke="#cbd5e1"/>
+        <text x="40" y="52" font-size="15" font-weight="700" fill="#1a2233">.claude/worktrees/s-u1/</text>
+        <text x="60" y="88" font-size="14" fill="#2563eb">├─ .git</text>
+        <text x="60" y="120" font-size="14" fill="#0f766e">├─ .env ⇢</text>
+        <text x="60" y="152" font-size="14" fill="#0f766e">├─ frontend/.env ⇢</text>
+        <text x="60" y="184" font-size="14" fill="#b45309">├─ frontend/node_modules/</text>
+        <text x="60" y="216" font-size="14" fill="#b45309">├─ backend/.venv/</text>
+        <text x="60" y="248" font-size="14" fill="#5a6474">└─ backend/ frontend/ docs/ …</text>
+
+        <line x1="215" y1="83" x2="460" y2="62" stroke="#2563eb" stroke-width="1.5" stroke-dasharray="4 3"/>
+        <line x1="185" y1="115" x2="460" y2="130" stroke="#0f766e" stroke-width="1.5" stroke-dasharray="4 3"/>
+        <line x1="290" y1="147" x2="460" y2="138" stroke="#0f766e" stroke-width="1.5" stroke-dasharray="4 3"/>
+        <line x1="320" y1="200" x2="460" y2="205" stroke="#b45309" stroke-width="1.5" stroke-dasharray="4 3"/>
+
+        <g font-family="-apple-system, 'Noto Sans TC', sans-serif">
+          <rect x="460" y="34" width="320" height="60" rx="10" fill="#e8f0fe" stroke="#93b4f5"/>
+          <text x="476" y="58" font-size="14" font-weight="700" fill="#1e3a8a">是「檔案」不是資料夾</text>
+          <text x="476" y="80" font-size="13" fill="#1e3a8a">只寫一行：真正的 .git 在哪裡</text>
+          <rect x="460" y="104" width="320" height="60" rx="10" fill="#ecfdf5" stroke="#6ee7b7"/>
+          <text x="476" y="128" font-size="14" font-weight="700" fill="#0f766e">symlink（捷徑）</text>
+          <text x="476" y="150" font-size="13" fill="#0f766e">指回主資料夾的 .env，同一把 key</text>
+          <rect x="460" y="174" width="320" height="60" rx="10" fill="#fffbeb" stroke="#fcd34d"/>
+          <text x="476" y="198" font-size="14" font-weight="700" fill="#92400e">各自安裝，不共用</text>
+          <text x="476" y="220" font-size="13" fill="#92400e">310 MB + 206 MB，佔了大部分空間</text>
+          <text x="476" y="262" font-size="13" fill="#5a6474">整個 s-u1 共約 518 MB</text>
+        </g>
+      </svg>
+      <figcaption>worktree 的工作檔案是獨立的；只有 .git 是共用的，而 .env 是被刻意用 symlink 接回主資料夾。</figcaption>
+    </figure>
+
+    <h3>那個 <code>.git</code> 檔案</h3>
+    <pre><code>$ cat .claude/worktrees/s-u1/.git
+gitdir: .../ai-chat-backend/.git/worktrees/s-u1</code></pre>
+    <p>主 repo 那邊也有對應的登記資料夾 <code>.git/worktrees/s-u1/</code>，裡面有它自己的 <code>HEAD</code>（指向 <code>feat/s-u1-9</code>）和 <code>index</code>。所以每個 worktree 有<b>自己目前在哪條分支、自己的暫存區</b>，但 commit 和分支都存在同一個地方。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">5</span>在這個專案要注意的坑</h2>
+    <div class="tablewrap"><table>
+      <tr><th>現象</th><th>原因</th><th>怎麼處理</th></tr>
+      <tr>
+        <td><code>git branch</code> 裡 <code>feat/s-u1-9</code> 前面有 <code>+</code>，刪不掉</td>
+        <td>它正被 s-u1 這個 worktree checkout 中。git 不准刪一條「有人正在用」的分支，也不准同一條分支同時在兩個資料夾 checkout。</td>
+        <td>先 <code>git worktree remove</code>，再 <code>git branch -d</code>。</td>
+      </tr>
+      <tr>
+        <td><code>git status</code> 一直出現 <code>?? .claude/worktrees/</code></td>
+        <td>這個資料夾在 repo 裡面，但 <code>.gitignore</code> 沒有排除它。</td>
+        <td>把 <code>.claude/worktrees/</code> 加進 <code>.gitignore</code>（另開一個小 commit）。</td>
+      </tr>
+      <tr>
+        <td>不小心 <code>git add .</code></td>
+        <td>git 會把 s-u1 當成「嵌在裡面的另一個 repo」，出現 embedded repository 警告，並把它加成一個奇怪的 gitlink。</td>
+        <td>同上，加進 <code>.gitignore</code> 就不會發生；已經加了就 <code>git rm --cached .claude/worktrees/s-u1</code>。</td>
+      </tr>
+    </table></div>
+
+    <div class="warn"><b>最重要的一點：資料庫只有一個。</b>s-u1 的 <code>.env</code> 是 symlink，讀到的設定跟主資料夾一模一樣。<code>backend/database.py</code> 沒有 <code>DATABASE_URL</code> 環境變數時，會用 <code>.env</code> 的 <code>POSTGRES_*</code> 組出 <code>localhost:5432</code>，也就是 docker 的 <code>chat_db</code>。所以在 worktree 裡跑 <code>alembic upgrade head</code>，改的就是<b>主資料夾正在用的同一個資料庫</b>。S-U1-9 刪掉了 <code>session_id</code> 欄位，只要在 s-u1 套用那個 migration，main 那邊的資料庫也就跟著沒有這個欄位了。檔案可以隔離，資料庫不行。</div>
+
+    <div class="tip"><b>docker 也一樣：</b><code>docker-compose.yml</code> 寫死了 <code>container_name: chat_db</code>、<code>chat_api</code>。在 worktree 裡再跑一次 <code>docker compose up</code> 會因為名字已被佔用而失敗。後端、資料庫請一律從主資料夾啟動；worktree 只拿來改檔案和跑不碰資料庫的檢查（例如 <code>npm run build</code>）。</div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">6</span>一個 worktree 的完整生命週期</h2>
+    <div class="flow">
+      <div class="box">git worktree add<br>（建資料夾＋分支）</div>
+      <div class="arrow">→</div>
+      <div class="box">在裡面改檔<br>commit</div>
+      <div class="arrow">→</div>
+      <div class="box">push、開 PR<br>merge</div>
+      <div class="arrow">→</div>
+      <div class="box">git worktree remove<br>（刪資料夾）</div>
+      <div class="arrow">→</div>
+      <div class="box">git branch -d<br>（刪分支）</div>
+    </div>
+    <p>s-u1 停在第四步之前。接下來你要做的就是最後兩格。</p>
+
+    <h3>常用指令</h3>
+    <pre><code><span class="cm"># 看有哪些 worktree</span>
+git worktree list
+
+<span class="cm"># 新開一個（-b 同時建新分支，從 main 出發）</span>
+git worktree add -b feat/xxx ../ai-chat-xxx main
+
+<span class="cm"># 刪掉：會先檢查裡面有沒有未提交的修改，有就拒絕</span>
+git worktree remove .claude/worktrees/s-u1
+
+<span class="cm"># 如果資料夾被直接 rm -rf 掉了，用這個清掉 .git 裡殘留的登記</span>
+git worktree prune</code></pre>
+
+    <div class="warn"><b>不要直接 <code>rm -rf</code> worktree 資料夾。</b>那樣 <code>.git/worktrees/s-u1/</code> 的登記還在，git 會以為分支還被佔用，<code>git branch -d</code> 照樣失敗。用 <code>git worktree remove</code>，它會一次把資料夾和登記都清乾淨；真的已經 rm 掉了，就補一個 <code>git worktree prune</code>。</div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">7</span>現在就清掉 s-u1</h2>
+    <pre><code><span class="cm"># 1. 確認裡面沒有東西會遺失</span>
+git -C .claude/worktrees/s-u1 status --short   <span class="cm"># 應該什麼都不印</span>
+git log --oneline main..feat/s-u1-9           <span class="cm"># 應該什麼都不印</span>
+
+<span class="cm"># 2. 刪 worktree（資料夾＋登記）</span>
+git worktree remove .claude/worktrees/s-u1
+
+<span class="cm"># 3. 分支前面的 + 消失了，現在可以刪</span>
+git branch -d feat/s-u1-9
+
+<span class="cm"># 4. 確認</span>
+git worktree list    <span class="cm"># 只剩主資料夾一行</span></code></pre>
+    <p class="muted">做完會釋放約 518 MB。若以後又用 Claude Code 開 worktree，merge 完記得一樣做這幾步。</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">8</span>小練習</h2>
+    <ol>
+      <li>執行 <code>cat .claude/worktrees/s-u1/.git</code>，再 <code>cat .git/worktrees/s-u1/HEAD</code>，說明兩個檔案各指向哪裡。</li>
+      <li>執行 <code>git branch</code>，找出前面有 <code>+</code> 的分支，解釋為什麼現在刪不掉它。</li>
+      <li>不刪 worktree，直接試 <code>git branch -d feat/s-u1-9</code>，看 git 給的錯誤訊息。</li>
+      <li>照第 7 節清掉 s-u1，再跑一次 <code>git branch</code>，確認 <code>+</code> 消失、分支也刪掉了。</li>
+      <li>想一想：如果兩個 worktree 同時在不同分支跑 <code>alembic upgrade head</code>，各自的 migration 不一樣，資料庫會變成什麼狀態？</li>
+    </ol>
+  </section>
+
+  <p class="muted" style="text-align:center">CT-Chat-Router · 由 Claude Code 產生 · 2026-11-24</p>
+
+</div>
+</body>
+</html>
