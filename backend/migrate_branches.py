@@ -1,4 +1,3 @@
-# backend/migrate_branches.py
 from sqlmodel import text, Session
 from database import engine
 
@@ -6,7 +5,6 @@ def migrate():
     print("1. 正在嘗試新增 has_branch 欄位...")
     try:
         with Session(engine) as session:
-            # 加上布林值欄位，預設為 False
             session.exec(text("ALTER TABLE message ADD COLUMN IF NOT EXISTS has_branch BOOLEAN DEFAULT FALSE;"))
             session.commit()
             print("✅ 成功新增 has_branch 欄位！")
@@ -16,7 +14,7 @@ def migrate():
     print("2. 開始掃描並標記舊有分支...")
     try:
         with Session(engine) as session:
-            # 邏輯：先找出「擁有多個小孩的 parent_id」，然後用遞迴往上找，找出它們的 Root 節點
+            # 找出有多個子節點的 parent，遞迴往上找到各自的 root
             query = text("""
             WITH RECURSIVE branch_parents AS (
                 SELECT parent_id FROM message 
@@ -36,7 +34,6 @@ def migrate():
             root_ids = [r[0] for r in results]
             
             if root_ids:
-                # 找到根節點了，把它們的 has_branch 設為 True
                 for rid in root_ids:
                     session.exec(text("UPDATE message SET has_branch = TRUE WHERE id = :rid"), params={"rid": rid})
                 session.commit()

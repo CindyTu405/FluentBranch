@@ -2,18 +2,15 @@ import google.generativeai as genai
 import os
 import asyncio
 
-# 設定 API Key
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
-# (V1-3) 沒有金鑰時不在 import 階段報錯：正式站可能移除 Gemini，金鑰也可能不設。
-# 真正要呼叫 Gemini 時才在 gemini_chat_stream 內拋出錯誤。
+# 未設定金鑰時不在 import 階段報錯；呼叫時才在 gemini_chat_stream 拋出。
 if GOOGLE_API_KEY:
     genai.configure(api_key=GOOGLE_API_KEY)
 
 
 def _max_output_tokens() -> int:
-    """(V1-2) 單次回覆輸出上限：環境變數 MAX_OUTPUT_TOKENS，預設 3000，每次呼叫時讀取。
-    不從 main 匯入（main 會 import 本檔，會循環）。"""
+    """單次回覆輸出上限（MAX_OUTPUT_TOKENS，預設 3000，每次呼叫重讀）。不從 main 匯入以免循環。"""
     raw = (os.getenv("MAX_OUTPUT_TOKENS") or "").strip()
     try:
         return int(raw)
@@ -22,44 +19,33 @@ def _max_output_tokens() -> int:
 
 
 async def gemini_chat_stream(message: str, history: list, model_name: str = "gemini-2.5-flash-lite"):
-    """
-    呼叫 Google Gemini API 並產生串流。
-    (V1-2) 整體失敗時不再 yield 錯誤文字（會外洩供應商訊息、也讓上層無法退額度），改為往上拋，
-    由 main.run_generation 統一處理。
-    """
+    """呼叫 Gemini 並串流回覆。錯誤往上拋由 main.run_generation 處理（不 yield 錯誤文字，避免外洩供應商訊息）。"""
     if not GOOGLE_API_KEY:
         raise RuntimeError("GOOGLE_API_KEY 未設定，無法呼叫 Gemini")
     print(f"🤖 正在使用模型: {model_name}")
     model = genai.GenerativeModel(model_name)
 
-    # 1. 將我們的 Message 物件轉換成 Gemini 看得懂的格式
-    # Gemini 的格式是: [{'role': 'user', 'parts': ['...']}, {'role': 'model', 'parts': ['...']}]
+    # Gemini 格式：role 為 user/model，內容放在 parts。
     gemini_history = []
     for msg in history:
         role = "user" if msg.role == "user" else "model"
         gemini_history.append({"role": role, "parts": [msg.content]})
 
-    # 2. 建立聊天物件 (ChatSession)
     chat = model.start_chat(history=gemini_history)
 
-    # 3. 發送訊息 (stream=True 代表要串流)
-    # 這裡要注意：Gemini 的 send_message_async 目前是回傳整個 response，
-    # 但它的 stream=True 可以讓我們用迭代器讀取。
-    # 為了配合 FastAPI 的 async generator，我們需要包裝一下。
+    # stream=True 時回傳可 async 迭代的 chunk。
     response = await chat.send_message_async(
         message,
         stream=True,
         generation_config={"max_output_tokens": _max_output_tokens()},
     )
 
-    # 4. 逐段回傳
     async for chunk in response:
         try:
-            # 檢查是否有候選內容且不為空
             if chunk.candidates and chunk.candidates[0].content.parts:
                 yield chunk.text
         except ValueError:
-            # 如果遇到 "Invalid operation" (代表這個 chunk 沒文字)，就直接略過
+            # Invalid operation 代表這個 chunk 沒有文字，略過。
             continue
         except Exception as e:
             print(f"Gemini Chunk Error: {e}")

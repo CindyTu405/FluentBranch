@@ -14,15 +14,7 @@ _memory_cache_time = 0.0
 
 
 def _as_utc(dt: datetime | None) -> datetime | None:
-    """
-    統一把 datetime 轉成「帶 UTC 時區」的版本。
-
-    為什麼需要這個：
-    FreeModelsCache.updated_at 在資料庫裡是 TIMESTAMP WITHOUT TIME ZONE，
-    psycopg2 讀出來是 naive datetime，直接跟 datetime.now(timezone.utc) 相減會報
-    TypeError: can't subtract offset-naive and offset-aware datetimes
-    (這就是「重啟 docker 後顯示暫無模型」的原因)。
-    """
+    """統一轉成帶 UTC 時區的 datetime。updated_at 是 naive（無時區），直接與 aware 時間相減會 TypeError。"""
     if dt is None:
         return None
     if dt.tzinfo is None:
@@ -32,16 +24,7 @@ def _as_utc(dt: datetime | None) -> datetime | None:
 
 
 def _is_free_pricing(pricing: dict) -> bool:
-    """
-    判斷這個模型是不是「真的完全免費」。
-
-    只檢查 prompt / completion 是不夠的，因為 OpenRouter 有些模型是
-    「依產出計費」而不是「依 token 計費」，例如：
-      google/lyria-3-pro-preview  → 每首歌 $0.08
-      google/lyria-3-clip-preview → 每段 clip $0.04
-    這類模型的 prompt / completion 都是 "0"，但其實是付費的，
-    所以這裡要把 pricing 裡所有欄位都檢查一遍。
-    """
+    """判斷是否真的免費。只看 prompt/completion 不夠（有些模型依產出計費，這兩欄是 0），所以檢查 pricing 所有欄位。"""
     if not pricing:
         return False
 
@@ -74,12 +57,7 @@ def _to_float(value) -> float:
 
 
 def _is_chat_model(item: dict) -> bool:
-    """
-    只保留「純文字對話」模型。
-
-    排除像 Lyria 這種 output 是 audio 的生成模型，
-    它們不該出現在聊天視窗的模型選單裡。
-    """
+    """只保留純文字對話模型（排除 output 為 audio 的生成模型）。"""
     arch = item.get("architecture") or {}
     output_modalities = arch.get("output_modalities") or []
     if output_modalities != ["text"]:
@@ -94,11 +72,7 @@ FREE_ROUTER_ID = "openrouter/free"
 
 
 def _is_free_model_id(model_id: str) -> bool:
-    """
-    OpenRouter 官方用 ":free" 後綴標示免費版模型。
-    定價欄位為 0 不一定可靠 (例如 inclusionai/ling-3.1-flash 沒有 :free 後綴，
-    API 回報 0 元，實際卻是付費模型)，所以以後綴為準。
-    """
+    """以 ":free" 後綴判斷免費。定價為 0 不可靠（有付費模型也回報 0），所以不看價格。"""
     return model_id.endswith(":free") or model_id == FREE_ROUTER_ID
 
 

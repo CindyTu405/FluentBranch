@@ -1,10 +1,4 @@
-"""(B13-1) 輸入長度上限與寫入端點限流的測試腳本。
-
-用法（只用臨時資料庫，不要指向正式 chat_db）：
-    cd backend && POSTGRES_DB=v1_models SQL_ECHO=false uv run python dev/limits_harness.py 2>&1 | grep -v sqlalchemy | tail -15
-
-做的事：真的 uvicorn（127.0.0.1:8770）+ 假 LLM 串流，絕不呼叫真模型；限流只在 g、h 案例開啟。
-"""
+"""輸入長度上限與寫入端點限流的測試。"""
 import os
 import sys
 import threading
@@ -109,7 +103,6 @@ def seed_chat(c: httpx.Client):
     return h.get("X-User-Message-Id"), h.get("X-Message-Id")
 
 
-# ---------- 案例 ----------
 
 def ta_chat_exact_limit():
     _, token = make_user()
@@ -213,7 +206,6 @@ def th_title_rate_limit():
             main.limiter.reset()
 
 
-# ---------- 伺服器與清理 ----------
 
 def start_server() -> uvicorn.Server:
     config = uvicorn.Config(main.app, host="127.0.0.1", port=PORT, log_level="warning")

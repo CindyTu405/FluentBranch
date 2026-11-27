@@ -1,9 +1,4 @@
-"""(S-U1-7) 本機專用：直接在 DB 建一個登入 session，印出可貼進瀏覽器 console 的 cookie 指令。
-
-用法：cd backend && uv run python dev/dev_session.py --provider github --email me@example.com
-只在 DATABASE_URL 的 host 是 localhost / 127.0.0.1 / db 時執行，否則 exit 1。
-stdout 只印一行：document.cookie="session=<token>; path=/"
-"""
+"""建立本機開發用登入 session，印出 cookie 指令（非本機資料庫時拒絕執行）。"""
 import argparse
 import os
 import sys

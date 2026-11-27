@@ -1,8 +1,4 @@
-"""(G2-8) uvicorn 存取日誌（access log）的查詢字串遮罩。
-
-為什麼需要：OAuth 回呼網址是 `/auth/.../callback?code=...&state=...`，uvicorn 的 access log 會把完整
-路徑（含查詢字串）寫進 log，等於把授權碼與 state 寫進 docker log。這個 filter 只改寫 uvicorn.access 的
-記錄：路徑含 /auth/ 且有查詢字串時，查詢字串換成 [redacted]。其他路徑不動。
+"""uvicorn access log 的查詢字串遮罩：/auth/ 路徑的 ?code=...&state=... 換成 [redacted]，避免授權碼寫進 log。
 """
 
 import logging

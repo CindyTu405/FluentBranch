@@ -7,50 +7,41 @@ import uuid
 
 
 def to_utc_iso(value: Optional[datetime]) -> Optional[str]:
-    """
-    把 datetime 一律序列化成「UTC + 結尾 Z」的 ISO 字串。
+    """把 datetime 序列化成 UTC 且結尾 Z 的 ISO 字串。
 
-    為什麼要這樣做：
-    資料庫欄位是 TIMESTAMP WITHOUT TIME ZONE，存的是 UTC，但讀出來是 naive，
-    Pydantic 會序列化成 "2026-10-09T08:56:25" (沒有時區標記)。
-    前端如果直接 new Date() 會被當成「使用者本機時間」，時區就會錯；
-    之前前端自己補 "Z" 的写法，遇到 SQL 回傳的 +08:00 就會變成
-    "...+08:00Z" → Invalid Date。
-
-    統一由後端輸出帶 Z 的 UTC 字串，前端就不用再猜時區了。
+    DB 讀出的 datetime 是 naive（實際為 UTC），不帶時區標記時前端會當成本機時間，所以由後端統一輸出 Z。
     """
     if value is None:
         return None
     if value.tzinfo is None:
-        # naive 一律視為 UTC (資料庫存的本来就是 UTC)
+        # naive 一律視為 UTC（DB 存的就是 UTC）
         value = value.replace(tzinfo=timezone.utc)
     return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-# ===== Phase 1：分支 (Branch) 實體 =====
 # 一個 Branch 代表從某則訊息 (anchor) 分岔出來的一條對話線。
 # root_message_id 是這條分支的對話起點，anchor_message_id 是分岔點；
 # parent_branch_id 讓分支可以再分支 (樹狀結構)。
 class Branch(SQLModel, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    # 這條分支的對話起點；分支剛建立、第一則訊息還沒送出前是 None (P2-9)
+    # 這條分支的對話起點；分支剛建立、第一則訊息還沒送出前是 None
     root_message_id: Optional[uuid.UUID] = Field(
         default=None, foreign_key="message.id", index=True
     )
-    # (G6-1) 改為 nullable。DESIGN_P3 主題 2 三態：
+    # 三態：
     #   inline 錨定：anchor 非空、attach_root_id 空、is_orphaned False
     #   底部入口：  anchor 空、attach_root_id 非空、is_orphaned False（重連後才有）
     #   幽靈：      anchor 空、attach_root_id 空、is_orphaned True
     anchor_message_id: Optional[uuid.UUID] = Field(
         default=None, foreign_key="message.id", index=True
     )
-    # (G6-1) 底部入口所屬的對話 root id（DESIGN_P3 主題 2，本次只加欄位）
+    # 底部入口所屬的對話 root id
     attach_root_id: Optional[uuid.UUID] = Field(
         default=None, foreign_key="message.id"
     )
-    # (G6-1) 幽靈分支：錨點所在的 AI 回覆被原地重新生成後設為 True
+    # 幽靈分支：錨點所在的 AI 回覆被原地重新生成後設為 True
     is_orphaned: bool = Field(default=False)
-    # 分支當下的錨點文字快照 (P2-9)：anchor 訊息被編輯/刪除時仍能顯示分支來源
+    # 分支當下的錨點文字快照：anchor 訊息被編輯/刪除時仍能顯示分支來源
     anchor_text: Optional[str] = None
     # 錨點在來源 markdown 的字元位移（半開區間：[start, end)），None 代表沒有精確位置
     anchor_start: Optional[int] = None
@@ -59,7 +50,7 @@ class Branch(SQLModel, table=True):
     parent_branch_id: Optional[uuid.UUID] = Field(
         default=None, foreign_key="branch.id"
     )
-    # (S-U1-9) 擁有者，必填（DB NOT NULL）；API 回應不輸出
+    # 擁有者，必填（DB NOT NULL）；API 回應不輸出
     user_id: uuid.UUID = Field(foreign_key="user.id", index=True, exclude=True)
     # naive UTC，理由同 Message.created_at
     created_at: datetime = Field(
@@ -67,40 +58,26 @@ class Branch(SQLModel, table=True):
     )
 
 
-# 這是 Message 的資料表定義
 class MessageBase(SQLModel):
-    # 對話內容
     content: str
     role: str  # "user" 或 "assistant"
 
-    # 使用哪個模型生成的 (例如 "gpt-4o", "gemini-pro")
+    # 生成此回覆的模型
     model_used: Optional[str] = None
 
-    # 建立時間
-    # 存 naive UTC：aware datetime 經 psycopg2 寫入 TIMESTAMP 欄位時，
-    # 會被 PostgreSQL 依 DB 的 TimeZone (Asia/Taipei) 轉成本地時間，造成時間偏移 8 小時。
+    # 存 naive UTC：aware datetime 寫入 TIMESTAMP 欄位時會被 DB 時區（Asia/Taipei）換算，偏移 8 小時。
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None)
     )
 
-    # --- 樹狀結構核心 ---
-    # 指向父節點的 ID (上一則訊息)
     parent_id: Optional[uuid.UUID] = Field(default=None, foreign_key="message.id")
 
-    # 關聯：透過 parent_id 找到父訊息 (這在程式碼中用來方便存取)
-    # parent: Optional["Message"] = Relationship(back_populates="children", sa_relationship_kwargs={"remote_side": "Message.id"})
-
-    # 關聯：找到所有子訊息 (這則訊息衍生出的不同回答)
-    # children: List["Message"] = Relationship(back_populates="parent")
-
-    # 對話標題
-    # 只有 "對話開頭 (Root)" 的訊息會有這個值，其他訊息通常為 None
+    # 只有對話開頭（root）的訊息有 title，其他通常為 None
     title: str | None = Field(default=None)
 
-    # 新增：是否包含分支的標記
+    # 此訊息之下是否有分支
     has_branch: bool = Field(default=False)
 
-    # --- Phase 1：分支 (Branch) ---
     # 這則訊息屬於哪個分支 (None = 尚未歸屬任何分支)
     branch_id: Optional[uuid.UUID] = Field(
         default=None, foreign_key="branch.id", index=True
@@ -115,61 +92,55 @@ class MessageBase(SQLModel):
     def serialize_created_at(self, value: Optional[datetime], _info) -> Optional[str]:
         return to_utc_iso(value)
 
-# 第二層：真正的資料庫表 (繼承 Base，並加上 table=True)
 class Message(MessageBase, table=True):
-    # 使用 UUID 作為 ID，比數字 1,2,3 更適合分散式系統
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    # (S-U1-9) 擁有者，必填（DB NOT NULL）；API 回應不輸出
+    # 擁有者，必填（DB NOT NULL）；API 回應不輸出
     user_id: uuid.UUID = Field(foreign_key="user.id", index=True, exclude=True)
 
-# 第三層：回傳給前端的白名單 (繼承 Base，並加入擴充欄位)
-# 注意：這裡必須重新定義 id，確保序列化時能正確導出
+# 回傳給前端的白名單；必須重新定義 id，否則序列化時匯不出
 class MessageWithActivity(MessageBase):
     id: uuid.UUID
     last_activity: Optional[datetime] = None
-    model_config = {"from_attributes": True} # ★ 確保 Pydantic 能從資料庫 Row 讀取屬性
+    model_config = {"from_attributes": True}  # 讓 Pydantic 能從 DB Row 讀屬性
 
     @field_serializer("last_activity")
     def serialize_last_activity(self, value: Optional[datetime], _info) -> Optional[str]:
         return to_utc_iso(value)
 
 
-# (S-U1-9) 對話歷史／樹的回應模型：與 Message 同欄位但不含 user_id（不回傳擁有者）
+# 對話歷史／樹的回應模型：與 Message 同欄位但不含 user_id（不回傳擁有者）
 class MessageRead(MessageBase):
     id: uuid.UUID
     model_config = {"from_attributes": True}
 
-# Pydantic 模型 (用於 API 請求驗證，不存入資料庫)
+# API 請求模型（不存入資料庫）
 class ChatRequest(SQLModel):
-    message: str = Field(max_length=20000)  # (B13)
+    message: str = Field(max_length=20000)
     parent_id: Optional[uuid.UUID] = None
-    model: str = Field(default="gpt-3.5-turbo", max_length=200)  # (B13)
-    # --- Phase 2：分支 (Branch) ---
+    model: str = Field(default="gpt-3.5-turbo", max_length=200)
     # 這次對話要寫入哪條分支 (None = 不歸屬分支，維持舊行為)
     branch_id: Optional[uuid.UUID] = None
     # 分支的錨點訊息 (從哪則訊息分岔出去的)
     anchor_message_id: Optional[uuid.UUID] = None
 
 class UpdateTitleRequest(SQLModel):
-    title: str = Field(max_length=200)  # (B13)
+    title: str = Field(max_length=200)
 
 
-# (G6-1) 重新生成最後一則 AI 回覆：只帶新模型名稱，內容固定沿用原本的 user 訊息。
+# 重新生成最後一則 AI 回覆：只帶新模型名稱，內容沿用原 user 訊息。
 class RegenerateRequest(SQLModel):
-    model: str = Field(max_length=200)  # (B13)
-    content: Optional[str] = Field(default=None, max_length=20000)  # (B13) (F9-1) 有帶 = 編輯最後一則 user 訊息；沒帶 = 純重傳（G6 原行為）
+    model: str = Field(max_length=200)
+    # content 有值 = 編輯最後一則 user 訊息；沒有 = 純重傳
+    content: Optional[str] = Field(default=None, max_length=20000)
 
 
-# ===== Phase 2 (P2-3)：建立分支的請求 =====
 # anchor_message_id: 從哪一則既有的訊息分岔出去
-# anchor_text: 錨點文字快照（用來當分支標題；P2-9 起不再預先建立訊息）
-# content: 保留欄位，建立分支時已不再使用
+# anchor_text: 錨點文字快照，用來當分支標題（不預先建立訊息）
+# content: 保留欄位，目前不使用
 class CreateBranchRequest(SQLModel):
     anchor_message_id: uuid.UUID
-    # (P2-9) 建立分支時不再強制產生第一則 user 訊息
     content: Optional[str] = None
-    # 錨點文字快照，用來當分支標題
-    anchor_text: Optional[str] = Field(default=None, max_length=5000)  # (B13)
+    anchor_text: Optional[str] = Field(default=None, max_length=5000)
     # 錨點在來源 markdown 的字元位移（半開區間：[start, end)）
     anchor_start: Optional[int] = None
     anchor_end: Optional[int] = None
@@ -185,9 +156,7 @@ class FreeModelsCache(SQLModel, table=True):
     )
 
 
-# ===== Phase 0：OAuth 使用者與登入 session =====
-
-GUEST_PROVIDER = "guest"  # (G2-1) 訪客的 oauth_provider 值
+GUEST_PROVIDER = "guest"  # 訪客的 oauth_provider 值
 
 
 class User(SQLModel, table=True):
@@ -200,7 +169,7 @@ class User(SQLModel, table=True):
     # provider 端的唯一使用者識別碼（sub）
     oauth_sub: str = Field(index=True)
     email: Optional[str] = None
-    # (G2-1) 最後一次送訊息的時間（naive UTC）；訪客保留期限從這裡算，None 時用 created_at
+    # 最後一次送訊息的時間（naive UTC）；訪客保留期限從這裡算，None 時用 created_at
     last_active_at: Optional[datetime] = None
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None)
@@ -212,7 +181,7 @@ class User(SQLModel, table=True):
 
     @property
     def is_guest(self) -> bool:
-        """(G2-1) 訪客：oauth_provider 為 "guest" 的使用者列。"""
+        """訪客：oauth_provider 為 "guest" 的使用者列。"""
         return self.oauth_provider == GUEST_PROVIDER
 
 
@@ -227,7 +196,6 @@ class AuthSession(SQLModel, table=True):
         default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None)
     )
 
-# ===== V1-2：每日額度（台灣日期）=====
 # 每位使用者每個台灣日期一列，count 為當日已扣次數；主鍵 (user_id, day)。
 # 使用者刪除時一併刪除（ON DELETE CASCADE）；刪除對話不退次數。
 class DailyUsage(SQLModel, table=True):
@@ -237,7 +205,6 @@ class DailyUsage(SQLModel, table=True):
     count: int = Field(default=0, sa_column_kwargs={"server_default": "0"})
 
 
-# ===== G2-1：訪客的 IP 計數（只存雜湊，不存原始 IP）=====
 # 每個 (ip_hash, 台灣日期) 一列。guests_created：當日由這個 IP 建立的訪客數；messages：當日訪客送出的則數。
 class GuestIpUsage(SQLModel, table=True):
     __tablename__ = "guest_ip_usage"
@@ -247,7 +214,6 @@ class GuestIpUsage(SQLModel, table=True):
     messages: int = Field(default=0, sa_column_kwargs={"server_default": "0"})
 
 
-# ===== G2-1：使用者自己的 OpenRouter 金鑰（只存 Fernet 密文）=====
 # 一位使用者最多一列；使用者刪除時一併刪除。key_encrypted 絕不回傳前端、不寫 log。
 class OpenRouterCredential(SQLModel, table=True):
     __tablename__ = "openrouter_credential"

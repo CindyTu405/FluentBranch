@@ -18,13 +18,12 @@ from slowapi import _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
-# 自訂模組
 from database import get_session, engine
 from auth_routes import cookie_secure, get_current_user, router as auth_router, SESSION_COOKIE_NAME
-from log_redaction import install_access_log_redaction  # (G2-8) uvicorn access log 遮罩 /auth/ 查詢字串
-from openrouter_connect import router as openrouter_router  # (G2-8) 必須先於 auth_router 掛載（/auth/{provider}/callback 會匹配 openrouter）
-from rate_limit import limiter  # (G2-2) 單一實例，auth_routes 也會用
-import guest  # (G2-3) 訪客 IP 雜湊與每 IP 訊息上限
+from log_redaction import install_access_log_redaction  # uvicorn access log 遮罩 /auth/ 查詢字串
+from openrouter_connect import router as openrouter_router  # 必須先於 auth_router 掛載（/auth/{provider}/callback 會匹配 openrouter）
+from rate_limit import limiter  # 單一實例，auth_routes 也會用
+import guest  # 訪客 IP 雜湊與每 IP 訊息上限
 from models import (
     User,
     Message,
@@ -37,52 +36,51 @@ from models import (
     CreateBranchRequest,
     RegenerateRequest,
     DailyUsage,
-    OpenRouterCredential,  # (G2-9)
+    OpenRouterCredential,
     to_utc_iso,
 )
-# from mock_llm import mock_chat_stream
 from gemini_llm import gemini_chat_stream
 from openrouter_llm import openrouter_chat_stream, UserKeyInvalid, UserKeyInsufficientCredit, UserKeyUpstreamError
-from crypto_utils import CredentialKeyError, decrypt_key  # (G2-9)
+from crypto_utils import CredentialKeyError, decrypt_key
 from scraper import get_free_models
 
 
 
-# (P3b-A1) 進行中 / 已完成的 AI 回覆緩衝。key = AI 訊息 id（str），value = {"text", "done"}。
+# 進行中 / 已完成的 AI 回覆緩衝。key = AI 訊息 id（str），value = {"text", "done"}。
 # 生成在獨立的 asyncio task 裡跑，不綁 HTTP 連線；切走對話或斷線不會停止生成。
-# 注意：只存在程序記憶體，後端重啟即遺失（D：接受遺失）。
+# 只存在程序記憶體，重啟即遺失。
 GENERATIONS: dict[str, dict] = {}
 
 logger = logging.getLogger(__name__)
 
-# (G6-1) 生成完成後緩衝保留秒數（讓續讀端讀到 done）。做成模組常數，harness 可以調短來測競態。
+# 生成完成後保留緩衝的秒數，讓續讀端讀到 done；harness 可調短以測競態。
 BUFFER_RETENTION_SECONDS = 60
 
 
-# (V1-2) 每日額度：以台灣日期計算（固定 UTC+8，不用 zoneinfo：slim 映像可能缺 tzdata）
+# 台灣時區固定 UTC+8（不用 zoneinfo：slim 映像可能缺 tzdata）
 TAIPEI_TZ = timezone(timedelta(hours=8))
 # 生成失敗時給使用者看的固定提示（不含供應商的錯誤訊息）
 GENERATION_FAILED_TEXT = "\n\n⚠️ 生成中斷，請稍後再試"
 
 
 def taiwan_date_of(utc_now: datetime) -> date:
-    """(V1-2) 把一個時間點換成台灣日期。純函式，給 harness 測日界（16:00Z 即台灣次日 00:00）。"""
+    """把一個時間點換成台灣日期。純函式，給 harness 測日界（16:00Z 即台灣次日 00:00）。"""
     return utc_now.astimezone(TAIPEI_TZ).date()
 
 
 def taiwan_today() -> date:
-    """(V1-2) 目前的台灣日期。"""
+    """目前的台灣日期。"""
     return taiwan_date_of(datetime.now(timezone.utc))
 
 
 def next_reset_at_utc(day: date) -> str:
-    """(V1-2) day 的下一個台灣 00:00，轉成 UTC ISO 字串（結尾 Z）。"""
+    """day 的下一個台灣 00:00，轉成 UTC ISO 字串（結尾 Z）。"""
     next_midnight = datetime.combine(day + timedelta(days=1), time(0), tzinfo=TAIPEI_TZ)
     return to_utc_iso(next_midnight)
 
 
 def _int_env(name: str, default: int) -> int:
-    """(V1-2) 讀整數環境變數；空白或不是整數就用預設值。"""
+    """讀整數環境變數；空白或不是整數就用預設值。"""
     raw = (os.getenv(name) or "").strip()
     try:
         return int(raw)
@@ -91,12 +89,12 @@ def _int_env(name: str, default: int) -> int:
 
 
 def daily_message_limit() -> int:
-    """(V1-2)(G2-3) 試用者（訪客與未連結 OpenRouter 的登入用戶）每個台灣日期的次數上限（DAILY_MESSAGE_LIMIT，預設 10）。"""
+    """試用者（訪客與未連結 OpenRouter 的登入用戶）每個台灣日期的次數上限（DAILY_MESSAGE_LIMIT，預設 10）。"""
     return guest.trial_daily_limit()
 
 
 def site_daily_message_limit() -> int:
-    """(V1-2) 全站每個台灣日期的總次數上限（SITE_DAILY_MESSAGE_LIMIT，預設 900）。"""
+    """全站每個台灣日期的總次數上限（SITE_DAILY_MESSAGE_LIMIT，預設 900）。"""
     return _int_env("SITE_DAILY_MESSAGE_LIMIT", 900)
 
 
@@ -110,18 +108,12 @@ def _daily_quota_exceeded(day: date) -> HTTPException:
 def charge_daily_quota(
     session: Session, user_id: uuid.UUID, guest_ip_hash: str | None = None, linked: bool = False
 ) -> date | None:
-    """(V1-2)(G2-3) 扣一次當日額度。不 commit：由呼叫端之後的 commit 與訊息寫入同一交易，
-    回傳扣款的台灣日期（退額度時要用同一天）。
+    """扣一次當日額度，回傳扣款的台灣日期（退額度用）。不 commit：與訊息寫入同一交易。
 
-    三層檢查依序進行，任何一層失敗都在同一交易內 rollback，因此不會留下任何扣款：
-    1. 全站當日總和 >= SITE_DAILY_MESSAGE_LIMIT → 503 site_quota_exceeded
-    2. 試用上限 DAILY_MESSAGE_LIMIT < 1 → 429 daily_quota_exceeded
-    3. 訪客（guest_ip_hash 不為 None）：該 IP 當日訊息數 +1，超過 GUEST_IP_DAILY_MESSAGES → 429 guest_ip_limit
-       （try_count_guest_message 失敗時已自行 rollback）
-    4. 個人每日額度：單一 INSERT ... ON CONFLICT DO UPDATE ... WHERE count < limit；沒有回傳列 → rollback（連第 3 層的 IP 加一一起丟掉）→ 429 daily_quota_exceeded
-    5. 通過後更新 user.last_active_at（UTC，naive）
+    依序檢查：全站上限（503 site_quota_exceeded）→ 試用上限（429）→ 訪客 IP 訊息數（429 guest_ip_limit）
+    → 個人每日額度（429）。任一層失敗都 rollback，不留下任何扣款。
     """
-    # (G2-9) 已連結者（用自己的 OpenRouter 金鑰）：不檢查全站上限、不寫 daily_usage、不計 IP，只更新 last_active_at。
+    # 已連結者（用自己的 OpenRouter 金鑰）：不檢查全站上限、不寫 daily_usage、不計 IP，只更新 last_active_at。
     # 回傳 None，之後的失敗也不會退額度（沒有扣款）。
     if linked:
         session.execute(
@@ -173,8 +165,7 @@ def charge_daily_quota(
 
 
 def refund_daily_quota(user_id: uuid.UUID, day: date, guest_ip_hash: str | None = None) -> None:
-    """(V1-2)(G2-3) 退 1 次（不低於 0）。自己開 session，不依賴請求的 session 生命週期。
-    guest_ip_hash 有值時同一交易也退該 IP 當日的訊息計數。"""
+    """退 1 次（不低於 0），自開 session；guest_ip_hash 有值時同一交易也退該 IP 當日訊息數。"""
     with Session(engine) as db_session:
         db_session.execute(
             text("UPDATE daily_usage SET count = GREATEST(count - 1, 0) WHERE user_id = :u AND day = :d"),
@@ -186,8 +177,7 @@ def refund_daily_quota(user_id: uuid.UUID, day: date, guest_ip_hash: str | None 
 
 
 def _persist_generation(ai_msg_id: str, text: str) -> None:
-    """(B12) 同步寫回生成結果。由 run_generation 用 asyncio.to_thread 呼叫，不在事件迴圈上取連線。
-    用獨立 session，避免依賴請求的 session 生命週期。"""
+    """同步寫回生成結果；由 run_generation 以 asyncio.to_thread 呼叫，使用獨立 session。"""
     with Session(engine) as db_session:
         msg = db_session.get(Message, uuid.UUID(ai_msg_id))
         if msg:
@@ -196,13 +186,13 @@ def _persist_generation(ai_msg_id: str, text: str) -> None:
             db_session.commit()
 
 
-# (G2-9) 使用者自己的金鑰失敗時的固定文字（不含供應商回應）
+# 使用者自己的金鑰失敗時的固定文字（不含供應商回應）
 USER_KEY_INVALID_TEXT = "⚠️ 你的 OpenRouter 連結已失效，請重新連結"
 USER_KEY_CREDIT_TEXT = "⚠️ 你的 OpenRouter 帳號額度不足"
 
 
 def resolve_user_api_key(session: Session, user: User) -> str | None:
-    """(G2-9) 連結者回傳解密後的金鑰；試用者（含訪客）或沒有連結列回 None。
+    """連結者回傳解密後的金鑰；試用者（含訪客）或沒有連結列回 None。
     只用已驗證的 user.id 查列。金鑰無法解密（加密金鑰已更換）→ 刪除該列並回 409，不建立任何訊息。"""
     if user.is_guest:
         return None
@@ -218,7 +208,7 @@ def resolve_user_api_key(session: Session, user: User) -> str | None:
 
 
 def _drop_credential_if_same(user_id: uuid.UUID, failed_key: str) -> bool:
-    """(G2-9) 401 後移除失效連結，但只在目前的密文仍解出 failed_key 時才刪。
+    """401 後移除失效連結，但只在目前的密文仍解出 failed_key 時才刪。
     使用者若已在此期間重新連結（列已是新金鑰），保留新列。DELETE 同時比對所讀到的密文。"""
     with Session(engine) as db_session:
         row = db_session.get(OpenRouterCredential, user_id)
@@ -242,7 +232,7 @@ def _drop_credential_if_same(user_id: uuid.UUID, failed_key: str) -> bool:
 
 
 def _is_linked(session: Session, user: User) -> bool:
-    """(G2-9) 已連結者：非訪客且有 openrouter_credential 列。"""
+    """已連結者：非訪客且有 openrouter_credential 列。"""
     return (not user.is_guest) and session.get(OpenRouterCredential, user.id) is not None
 
 
@@ -257,23 +247,24 @@ async def run_generation(
     api_key: str | None = None,
     key_owner_id: uuid.UUID | None = None,
 ):
-    """背景執行一次 AI 生成：邊收 chunk 邊寫入緩衝，完成後寫回 DB。
-    (V1-2) 失敗時：不記錄訊息內容、只給固定提示；若一個字都還沒產出，退回扣款的 1 次。
-    (B12) 退次數與寫回都是阻塞的 DB 呼叫，改用 asyncio.to_thread，避免卡住事件迴圈。"""
+    """背景執行一次 AI 生成：邊收 chunk 邊寫緩衝，完成後寫回 DB。
+
+    失敗只給固定提示（不記錄內容）；若一個字都沒產出則退回扣款。DB 呼叫都用 asyncio.to_thread。
+    """
     buf = GENERATIONS[ai_msg_id]
     try:
         if api_key is not None:
-            # (G2-9) 連結者：一律走 OpenRouter 並用自己的金鑰（即使是 gemini* 模型，也不走直連 Gemini）
+            # 連結者：一律走 OpenRouter 並用自己的金鑰（即使是 gemini* 模型，也不走直連 Gemini）
             stream = openrouter_chat_stream(message, history, model, api_key=api_key)
         elif model.startswith("gemini"):
             stream = gemini_chat_stream(message, history, model)
         else:
-            # 試用者：維持原本的呼叫形式（不帶 api_key 參數）
+            # 試用者走平台金鑰（不帶 api_key）
             stream = openrouter_chat_stream(message, history, model)
         async for chunk in stream:
             buf["text"] += chunk
     except UserKeyInvalid:
-        # (G2-9) 401：固定文字；只有目前的密文仍是這把失效金鑰時才移除連結。不重試、不改用平台金鑰。
+        # 401：固定文字；只有目前的密文仍是這把失效金鑰時才移除連結。不重試、不改用平台金鑰。
         logger.warning("(G2-9) 使用者 OpenRouter 金鑰被拒絕 ai_msg=%s", ai_msg_id)
         buf["text"] = USER_KEY_INVALID_TEXT
         if api_key is not None and key_owner_id is not None:
@@ -282,11 +273,11 @@ async def run_generation(
             except Exception:
                 logger.warning("(G2-9) 移除失效連結失敗 ai_msg=%s", ai_msg_id)
     except UserKeyInsufficientCredit:
-        # (G2-9) 402：固定文字；連結保留
+        # 402：固定文字；連結保留
         logger.warning("(G2-9) 使用者 OpenRouter 額度不足 ai_msg=%s", ai_msg_id)
         buf["text"] = USER_KEY_CREDIT_TEXT
     except UserKeyUpstreamError:
-        # (G2-9) 其他錯誤：沿用現有的固定提示；不重試、不改用平台金鑰。連結者的生成不扣額度，也無需退額度。
+        # 其他錯誤：沿用現有的固定提示；不重試、不改用平台金鑰。連結者的生成不扣額度，也無需退額度。
         logger.warning("(G2-9) 使用者 OpenRouter 生成失敗 ai_msg=%s", ai_msg_id)
         buf["text"] += GENERATION_FAILED_TEXT
     except Exception:
@@ -299,10 +290,10 @@ async def run_generation(
             except Exception:
                 logger.exception("(V1-2) 退回額度失敗 user=%s day=%s", usage_user_id, usage_day)
     finally:
-        # (B17) 先寫回 DB 再標記 done：串流不能在 DB 還沒有回覆時就回報完成。
+        # 先寫回 DB 再標記 done：串流不能在 DB 還沒有回覆時就回報完成。
         # done 放在內層 finally：寫回失敗或 task 被取消也一定會設，否則讀取端會一直等。
         try:
-            # (B12) 寫回失敗只記 log，仍要往下做緩衝保留與清理
+            # 寫回失敗只記 log，仍要往下做緩衝保留與清理
             try:
                 await asyncio.to_thread(_persist_generation, ai_msg_id, buf["text"])
             except Exception:
@@ -311,17 +302,17 @@ async def run_generation(
             buf["done"] = True
         # 寫入完成後保留緩衝一小段時間，讓正在續讀的前端能讀到 done
         await asyncio.sleep(BUFFER_RETENTION_SECONDS)
-        # (G6-1) 只清「自己放進去的那一份」：重傳時同一個 id 可能已經有新緩衝，不能誤清
+        # 只清「自己放進去的那一份」：重傳時同一個 id 可能已經有新緩衝，不能誤清
         if GENERATIONS.get(ai_msg_id) is buf:
             GENERATIONS.pop(ai_msg_id, None)
 
 
-# (G2-5) 保留期限清理的執行間隔（秒）
+# 保留期限清理的執行間隔（秒）
 GUEST_PURGE_INTERVAL_SECONDS = 3600
 
 
 async def _guest_purge_loop():
-    """(G2-5) 每小時清一次過期訪客。guest.run_purge_once 是阻塞的 DB 呼叫，丟到執行緒執行。"""
+    """每小時清一次過期訪客。guest.run_purge_once 是阻塞的 DB 呼叫，丟到執行緒執行。"""
     while True:
         try:
             n = await asyncio.to_thread(guest.run_purge_once)
@@ -332,13 +323,11 @@ async def _guest_purge_loop():
         await asyncio.sleep(GUEST_PURGE_INTERVAL_SECONDS)
 
 
-# 1. Lifespan (生命週期管理器)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # 資料表一律由 Alembic 管理（alembic upgrade head），啟動時不再自動 create_all。
-    # (G2-5) 每小時清一次 7 天沒活動的訪客；阻塞的 DB 呼叫丟到執行緒，不擋事件迴圈
+    # 資料表由 Alembic 管理（alembic upgrade head），啟動時不建表。
     purge_task = asyncio.create_task(_guest_purge_loop())
-    # (G2-8) uvicorn 可能在 main 匯入之後才套用自己的 logging 設定；啟動時再裝一次（idempotent）
+    # uvicorn 可能覆寫 logging 設定，啟動時再裝一次（冪等）
     install_access_log_redaction()
     yield
     purge_task.cancel()
@@ -359,7 +348,7 @@ def _api_docs_enabled() -> bool:
     )
 
 
-# (G2-8) 模組匯入時就裝一次；lifespan 啟動時會再裝一次，確保 uvicorn 套用 logging 設定後仍有效
+# 模組匯入時就裝一次；lifespan 啟動時會再裝一次，確保 uvicorn 套用 logging 設定後仍有效
 install_access_log_redaction()
 
 _DOCS_ON = _api_docs_enabled()
@@ -370,16 +359,13 @@ app = FastAPI(
     openapi_url="/openapi.json" if _DOCS_ON else None,
 )
 
-# 2. Rate limit (slowapi)：預設 key 仍是來源 IP；/chat 與 regenerate 改用 rate_limit_key（依登入者）。
-# /chat 會觸發付費 LLM 呼叫，限制每分鐘 10 次，避免被刷。
+# 限流：預設依來源 IP；/chat 與 regenerate 改依登入者（rate_limit_key）。/chat 會呼叫付費 LLM。
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 
 def rate_limit_key(request: Request) -> str:
-    """(V1-2) 限流 key：有登入 cookie 時用 "user:" + sha256(cookie)，同一 IP 的不同使用者互不影響；
-    沒有 cookie 才退回來源 IP。沒有 cookie 的請求在限流前就被 get_current_user 擋成 401。
-    cookie 只存雜湊，不在限流表裡留下原始 token。"""
+    """限流 key：有登入 cookie 時用 sha256(cookie)（同 IP 的不同使用者互不影響），否則用來源 IP。限流表不存原始 token。"""
     token = request.cookies.get(SESSION_COOKIE_NAME)
     if token:
         return "user:" + hashlib.sha256(token.encode("utf-8")).hexdigest()
@@ -406,7 +392,7 @@ app.add_middleware(
 # 模型白名單（免費 tier）：環境變數 ALLOWED_MODELS，逗號分隔。
 # 支援 `prefix*` 前綴匹配（例如 "gemini*" 允許所有 gemini 開頭的模型），其餘為精確比對。
 # 目的：避免使用者填入任意 OpenRouter 付費 model ID，燒掉平台金鑰。
-# (V1-3) 字面值 "none" 不是模型名，代表空白名單（只剩免費模型清單可用）。
+# 字面值 "none" 不是模型名，代表空白名單（只剩免費模型清單可用）。
 def _parse_allowed_models(raw: str) -> list[str]:
     return [m.strip() for m in raw.split(",") if m.strip() and m.strip() != "none"]
 
@@ -433,7 +419,7 @@ def is_model_allowed(model: str, session: Session | None = None) -> bool:
 
     return False
 
-# (V1-3) 模型選單：presets 來自 ALLOWED_MODELS（每次呼叫時讀取，harness 可替換），
+# 模型選單：presets 來自 ALLOWED_MODELS（每次呼叫時讀取，harness 可替換），
 # default_model 來自 DEFAULT_MODEL（同樣每次讀取）。
 GEMINI_PRESET = {"value": "gemini-2.5-flash-lite", "label": "Gemini 2.5 Flash Lite"}
 
@@ -473,16 +459,15 @@ def _default_model(session: Session, presets: list[dict]) -> str | None:
 app.add_middleware(
     SessionMiddleware,
     secret_key=os.getenv("SESSION_SECRET_KEY", "dev-secret-change-me"),
-    session_cookie="oauth_state",  # (B10) 不可與登入 cookie "session" 同名
+    session_cookie="oauth_state",  # 不可與登入 cookie "session" 同名
     max_age=600,
     same_site="lax",
     https_only=cookie_secure(),
 )
 
-# (G2-8) OpenRouter 連結：必須在 auth_router 之前，否則 /auth/openrouter/callback 會被 oauth_callback 先匹配
+# OpenRouter 連結：必須在 auth_router 之前，否則 /auth/openrouter/callback 會被 oauth_callback 先匹配
 app.include_router(openrouter_router)
 
-# OAuth 登入 / 回呼 / 登出
 app.include_router(auth_router)
 
 
@@ -494,7 +479,7 @@ def read_root():
 def get_owned_message(
     session: Session, message_id: uuid.UUID, user: User, detail: str = "not found"
 ) -> Message:
-    """(S-U1-4) 取訊息：不存在或不屬於 user 一律 404，不洩漏存在與否。"""
+    """取訊息：不存在或不屬於 user 一律 404，不洩漏存在與否。"""
     msg = session.get(Message, message_id)
     if msg is None or msg.user_id != user.id:
         raise HTTPException(status_code=404, detail=detail)
@@ -504,7 +489,7 @@ def get_owned_message(
 def get_owned_branch(
     session: Session, branch_id: uuid.UUID, user: User, detail: str = "not found"
 ) -> Branch:
-    """(S-U1-4) 取分支：不存在或不屬於 user 一律 404。"""
+    """取分支：不存在或不屬於 user 一律 404。"""
     branch = session.get(Branch, branch_id)
     if branch is None or branch.user_id != user.id:
         raise HTTPException(status_code=404, detail=detail)
@@ -512,25 +497,19 @@ def get_owned_branch(
 
 
 def get_conversation_history(session: Session, parent_id: uuid.UUID | None) -> list[Message]:
-    """
-    從給定的 parent_id 開始，一路往上找祖先，直到根節點。
-    回傳順序：[最舊的訊息, ..., 最新的父訊息]
-    """
+    """從 parent_id 往上追到根，回傳 [最舊, ..., 最新的父訊息]。"""
     history = []
     current_id = parent_id
 
-    # 使用 while 迴圈一路往回查 (Linked List Traversal)
     while current_id:
-        # 從 DB 撈出這則訊息
         msg = session.get(Message, current_id)
         if not msg:
             break  # 找不到就斷掉（預防萬一）
 
         history.append(msg)
-        current_id = msg.parent_id  # 往上找爸爸
+        current_id = msg.parent_id
 
-    # 因為我們是從下往上找，所以列表現在是 [子, 父, 爺]
-    # 但 AI 需要的是 [爺, 父, 子]，所以要反轉
+    # 往上找時列表是 [子, 父, 爺]，AI 需要 [爺, 父, 子]，所以反轉
     history.reverse()
 
     return history
@@ -543,17 +522,17 @@ async def chat_endpoint(
     session: Session = Depends(get_session),
     user: User = Depends(get_current_user),
 ):
-    # (G2-9) 連結者的金鑰：最先解密（失效 → 409，不建立訊息、不扣額度）
+    # 連結者的金鑰：最先解密（失效 → 409，不建立訊息、不扣額度）
     api_key = resolve_user_api_key(session, user)
     linked = api_key is not None
 
     # 0. 模型白名單檢查（免費 tier）：必須在任何寫入 DB / 呼叫 LLM 之前就擋掉，
     #    否則會留下沒有回覆的孤兒訊息；而且串流一旦開始就無法再回 403。
-    #    (G2-9) 連結者跳過白名單（只有長度限制，由 ChatRequest 檢查）。
+    # 連結者跳過白名單（只有長度限制，由 ChatRequest 檢查）。
     if not linked and not is_model_allowed(payload.model, session):
         raise HTTPException(status_code=403, detail=f"Model '{payload.model}' is not allowed on this plan")
 
-    # (S-U1-4) 擁有者檢查：帶了的 parent_id / branch_id / anchor_message_id 都要屬於本人，
+    # 擁有者檢查：帶了的 parent_id / branch_id / anchor_message_id 都要屬於本人，
     # 必須在讀歷史、任何寫入與 LLM 呼叫之前。
     if payload.parent_id is not None:
         get_owned_message(session, payload.parent_id, user)
@@ -562,16 +541,15 @@ async def chat_endpoint(
     if payload.anchor_message_id is not None:
         get_owned_message(session, payload.anchor_message_id, user)
 
-    # ★★★ 修正補上：先取得歷史對話紀錄 ★★★
-    # 這行是為了讓後面的 gemini_chat_stream / openrouter_chat_stream 有 history 可以用
+    # 生成用的歷史對話
     history = get_conversation_history(session, payload.parent_id)
 
-    # (V1-2) 扣每日額度：在任何寫入之前；不 commit，下面第一個 commit 與訊息寫入同一交易
+    # 扣每日額度：在任何寫入之前；不 commit，下面第一個 commit 與訊息寫入同一交易
     user_id = user.id  # 先取出，commit 之後 ORM 物件會過期
-    guest_ip_hash = guest.hash_ip(guest.client_ip(request)) if user.is_guest else None  # (G2-3) 訪客才計 IP
+    guest_ip_hash = guest.hash_ip(guest.client_ip(request)) if user.is_guest else None  # 訪客才計 IP
     usage_day = charge_daily_quota(session, user_id, guest_ip_hash, linked=linked)
 
-    # 1. 先存使用者的訊息 (User Message)
+    # 存使用者訊息
     user_msg = Message(role="user", content=payload.message, parent_id=payload.parent_id,
                        user_id=user.id,
                        branch_id=payload.branch_id, anchor_message_id=payload.anchor_message_id)
@@ -579,8 +557,7 @@ async def chat_endpoint(
     session.commit()
     session.refresh(user_msg)
 
-    # (P2-9) 分支的第一則訊息要回填成該分支的 root_message_id：
-    # 建立分支時不再預先塞一則 user 訊息，root 等使用者真的送出第一句話才綁定。
+    # 分支的 root 綁定到第一則 user 訊息（建立分支時不預先建立訊息）
     if payload.branch_id:
         branch = session.get(Branch, payload.branch_id)
         if branch and branch.root_message_id is None:
@@ -589,22 +566,18 @@ async def chat_endpoint(
             session.commit()
 
     if payload.parent_id and len(history) > 0:
-        # 看看這個「爸爸」現在有幾個「小孩 (回覆)」了
         children = session.exec(select(Message.id).where(Message.parent_id == payload.parent_id)).all()
         
-        # 如果小孩數量 > 1，代表這是一個分支操作！
+        # 有多個子訊息代表這是分支操作
         if len(children) > 1:
-            root_node = history[0]  # history 的第一個元素剛好就是整棵樹的根節點 (Root)
+            root_node = history[0]  # history 第一個元素即樹根
             
-            # 如果還沒被標記過，就把它標記為 True 並存檔
             if not root_node.has_branch:
-                # 因為 root_node 已經在 session 裡了，所以直接改屬性再 commit 即可
                 root_node.has_branch = True
                 session.add(root_node)
                 session.commit()
 
-    # 2. 立刻建立 AI 訊息 (佔位)
-    # 先存一個空字串，目的是為了馬上拿到 ID，確保連結不斷裂
+    # 先建立 AI 佔位訊息，拿到 ID 後才能讓串流連結
     ai_msg = Message(
         role="assistant", 
         content="",  # 先留空，等串流完再補
@@ -615,9 +588,9 @@ async def chat_endpoint(
     )
     session.add(ai_msg)
     session.commit()
-    session.refresh(ai_msg) # 拿到真正的 UUID 了！
+    session.refresh(ai_msg)
 
-    # (P3b-A1) 生成交給背景 task；連線只負責讀緩衝。
+    # 生成交給背景 task；連線只負責讀緩衝。
     ai_id = str(ai_msg.id)
     user_msg_id = str(user_msg.id)
     GENERATIONS[ai_id] = {"text": "", "done": False}
@@ -628,7 +601,7 @@ async def chat_endpoint(
         usage_user_id=user_id, usage_day=usage_day, usage_ip_hash=guest_ip_hash,
         api_key=api_key, key_owner_id=user_id,
     ))
-    # (B12) 串流可能持續數十秒；這裡先還回連線。之後的回應只用上面的純值，不碰 ORM 物件。
+    # 串流可能持續數十秒；這裡先還回連線。之後的回應只用上面的純值，不碰 ORM 物件。
     session.close()
 
     async def stream_generator():
@@ -636,21 +609,20 @@ async def chat_endpoint(
         async for piece in _read_buffer(ai_id, 0):
             yield piece
 
-    # 4. 回傳 Response，這時候 headers 裡已經有真正的 ID 了！
     return StreamingResponse(
         stream_generator(),
         media_type="text/plain",
         headers={"X-Message-Id": ai_id,
                 "X-User-Message-Id": user_msg_id,  # 讓前端把樂觀顯示的 user 訊息補上真 id
-                "X-Accel-Buffering": "no",      # ★ 叫 Nginx 絕對不要緩衝
-                "Cache-Control": "no-cache",    # ★ 不要快取
-                "Connection": "keep-alive"      # ★ 保持連線開啟
+                "X-Accel-Buffering": "no",      # 不要讓 Nginx 緩衝
+                "Cache-Control": "no-cache",    # 不快取
+                "Connection": "keep-alive"      # 保持連線
                 }
     )
 
 
 async def _read_buffer(ai_id: str, offset: int):
-    """(P3b-A2) 從緩衝的 offset 位置開始吐新文字，直到 done。緩衝不存在則結束。
+    """從緩衝的 offset 位置開始吐新文字，直到 done。緩衝不存在則結束。
     offset 以「字元」計，與前端 aiResponseText.length 對齊。"""
     while True:
         buf = GENERATIONS.get(ai_id)
@@ -672,11 +644,11 @@ async def stream_message(
     session: Session = Depends(get_session),
     user: User = Depends(get_current_user),
 ):
-    """(P3b-A2) 續讀一則 AI 回覆：回傳從 offset 之後的新文字。
+    """續讀一則 AI 回覆：回傳從 offset 之後的新文字。
     - 生成中：會持續等待直到完成（切回對話時用來接續顯示）。
     - 已完成（緩衝已清掉）：直接從 DB 回傳 offset 之後的內容。
     - 找不到、不是 AI 回覆、或不屬於本人：404。
-    (S-U1-4) 一定先查擁有者，再查 GENERATIONS 緩衝，否則別人可以讀到生成中的內容。"""
+    一定先查擁有者，再查 GENERATIONS 緩衝，否則別人可以讀到生成中的內容。"""
     try:
         msg_uuid = uuid.UUID(message_id)
     except ValueError:
@@ -686,7 +658,7 @@ async def stream_message(
     if msg.role != "assistant":
         raise HTTPException(status_code=404, detail="not found")
 
-    # (B12) 先取出需要的值再關 session：串流期間不能佔著連線，之後也不能再碰 ORM 物件
+    # 先取出需要的值再關 session：串流期間不能佔著連線，之後也不能再碰 ORM 物件
     buf_key = str(msg.id)
     saved_content = msg.content
     session.close()
@@ -699,7 +671,7 @@ async def stream_message(
                              headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
 
 @app.post("/messages/{message_id}/regenerate")
-@limiter.limit("10/minute", key_func=rate_limit_key)  # (G6-1) 跟 /chat 一樣會打付費 LLM，限流同等級
+@limiter.limit("10/minute", key_func=rate_limit_key)  # 跟 /chat 一樣會打付費 LLM，限流同等級
 async def regenerate_message(
     message_id: str,
     payload: RegenerateRequest,
@@ -707,9 +679,9 @@ async def regenerate_message(
     session: Session = Depends(get_session),
     user: User = Depends(get_current_user),
 ):
-    """(G6-1) 原地重新生成一則 AI 回覆（只允許「最後一則」）。
+    """原地重新生成一則 AI 回覆（只允許「最後一則」）。
 
-    (F9-1) 可選帶 content：同時編輯最後一則 user 訊息的內容，再用新內容生成。
+    可選帶 content：同時編輯最後一則 user 訊息的內容，再用新內容生成。
 
     檢查順序：404（不存在／非 AI／不屬於本人）→ 422（content 帶了但全是空白）→
     403（模型不在白名單，改資料之前擋）→
@@ -726,11 +698,11 @@ async def regenerate_message(
         raise HTTPException(status_code=404, detail="not found")
     user_msg = get_owned_message(session, ai.parent_id, user)
 
-    # (F9-1) 422：帶了 content 但全是空白，在任何寫入之前擋掉
+    # 422：帶了 content 但全是空白，在任何寫入之前擋掉
     if payload.content is not None and not payload.content.strip():
         raise HTTPException(status_code=422, detail="content is empty")
 
-    # (G2-9) 連結者的金鑰：在模型檢查與任何改寫之前解密（失效 → 409，不改任何訊息）
+    # 連結者的金鑰：在模型檢查與任何改寫之前解密（失效 → 409，不改任何訊息）
     api_key = resolve_user_api_key(session, user)
     linked = api_key is not None
 
@@ -756,12 +728,12 @@ async def regenerate_message(
     if later_child is not None:
         raise HTTPException(status_code=409, detail="not the last message")
 
-    # (V1-2) 扣每日額度：通過所有 4xx 檢查之後、任何改寫之前；不 commit，f 的 commit 一併提交
+    # 扣每日額度：通過所有 4xx 檢查之後、任何改寫之前；不 commit，f 的 commit 一併提交
     usage_user_id = user.id  # 先取出，commit 之後 ORM 物件會過期
-    guest_ip_hash = guest.hash_ip(guest.client_ip(request)) if user.is_guest else None  # (G2-3) 訪客才計 IP
+    guest_ip_hash = guest.hash_ip(guest.client_ip(request)) if user.is_guest else None  # 訪客才計 IP
     usage_day = charge_daily_quota(session, usage_user_id, guest_ip_hash, linked=linked)
 
-    # (F9-1) 編輯 user 訊息：與下面的幽靈化、AI 清空同一個 commit，不能分開寫
+    # 編輯 user 訊息：與下面的幽靈化、AI 清空同一個 commit，不能分開寫
     if payload.content is not None:
         user_msg.content = payload.content
         session.add(user_msg)
@@ -773,7 +745,7 @@ async def regenerate_message(
     # e. 幽靈化：錨在這則上的分支 → anchor 清空、is_orphaned=True；分支的 root 斷開 parent 與 anchor
     orphaned_ids: list[str] = []
     branches = session.exec(select(Branch).where(Branch.anchor_message_id == ai.id)).all()
-    # (E2) 幽靈記住原本所屬的對話：寫入這則 AI 回覆所在樹的樹根
+    # 幽靈記住原本所屬的對話：寫入這則 AI 回覆所在樹的樹根
     tree_root_id = _find_tree_root(session, ai).id
     for br in branches:
         br.anchor_message_id = None
@@ -807,7 +779,7 @@ async def regenerate_message(
     ))
 
     # h. 串流：與 /chat 相同，讀緩衝直到 done
-    # (B12) 回傳前先還連線；下面只用上面的純值（ai_id、orphaned_ids）
+    # 回傳前先還連線；下面只用上面的純值（ai_id、orphaned_ids）
     session.close()
     return StreamingResponse(
         _read_buffer(ai_id, 0),
@@ -827,14 +799,10 @@ def get_chat_roots(
     session: Session = Depends(get_session),
     user: User = Depends(get_current_user),
 ):
-    """
-    取得側邊欄列表，支援兩種排序：
-    1. created: 依建立日期排序 (舊版預設)
-    2. updated: 依最後活躍時間排序 (尋找該對話樹中最新的訊息時間)
-    """
+    """側邊欄對話列表：sort_by 為 created（依建立時間）或 updated（依整棵樹的最後活動時間）。"""
     if sort_by == "created":
         # 簡單模式：只看根節點的建立時間
-        # (G6-1) 只列主線根（branch_id IS NULL）：幽靈分支的 root 斷開 parent 後也沒有 parent，不能被當成新對話
+        # 只列主線根（branch_id IS NULL）：幽靈分支的 root 斷開 parent 後也沒有 parent，不能被當成新對話
         statement = select(Message).where(
             Message.parent_id == None,
             Message.user_id == user.id,
@@ -883,7 +851,7 @@ def get_chat_roots(
         
         results = session.exec(query, params={"uid": user.id}).mappings().all()
         
-        # ★ 強制手動映射：把 RowMapping 拆解並塞入白名單模型，絕對不讓 FastAPI/Driver 偷偷丟掉欄位
+        # 手動映射到白名單模型，避免 FastAPI/driver 悄悄丟欄位
         return [MessageWithActivity(**row) for row in results]
 
 @app.get("/chats/{root_id}/history", response_model=list[MessageRead])
@@ -893,13 +861,13 @@ def get_chat_history(
     user: User = Depends(get_current_user),
 ):
     """
-    (P2-6) history 只回「跟 root 相同 branch_id」的那條線。
+    history 只回「跟 root 相同 branch_id」的那條線。
 
     root 是主幹 (branch_id IS NULL) 就只走主幹；
     root 是分支根 (branch_id = X) 就只走 X 這條分支，不跨越回祖先主幹。
     這樣主線與分支各自乾淨，不會被別條分支的最新訊息污染。
     """
-    # (S-U1-4) 起點必須屬於本人，否則 404（不存在與不屬於本人無法區分）
+    # 起點必須屬於本人，否則 404（不存在與不屬於本人無法區分）
     get_owned_message(session, root_id, user)
 
     # 單一遞迴 CTE：從 root 往下遞迴，只沿著 branch_id 與父節點相同的子訊息走。
@@ -922,9 +890,8 @@ def get_chat_history(
     
     return results
 
-# ★★★ 功能 1: 修改對話標題 ★★★
 @app.patch("/chats/{root_id}/title")
-@limiter.limit("30/minute", key_func=rate_limit_key)  # (B13)
+@limiter.limit("30/minute", key_func=rate_limit_key)
 def update_chat_title(
     request: Request,
     root_id: uuid.UUID,
@@ -940,9 +907,8 @@ def update_chat_title(
     session.refresh(msg)
     return {"status": "ok", "title": msg.title}
 
-# ★★★ 功能 2: 刪除對話串 ★★★
 def _descendant_message_ids(session: Session, seed_ids: set[uuid.UUID]) -> set[uuid.UUID]:
-    """(B11) 種子訊息本身加上所有子孫（沿 parent_id）。UNION 會去重，循環也不會無限迴圈。"""
+    """種子訊息本身加上所有子孫（沿 parent_id）。UNION 會去重，循環也不會無限迴圈。"""
     if not seed_ids:
         return set()
     rows = session.exec(
@@ -960,7 +926,7 @@ def _descendant_message_ids(session: Session, seed_ids: set[uuid.UUID]) -> set[u
 
 
 def _collect_delete_scope(session: Session, root_id: uuid.UUID) -> tuple[set[uuid.UUID], set[uuid.UUID]]:
-    """(B11) 算出刪除 root_id 這串對話的範圍：(訊息 id 集合 D, 分支 id 集合 B)。
+    """算出刪除 root_id 這串對話的範圍：(訊息 id 集合 D, 分支 id 集合 B)。
 
     規則，重複擴大直到兩個集合都不再變大：
     - D 起始為 root_id 與它的所有子孫。
@@ -1008,31 +974,19 @@ def delete_chat(
     session: Session = Depends(get_session),
     user: User = Depends(get_current_user),
 ):
-    """
-    (B11) 刪除整串對話，連同分支與幽靈分支。
+    """刪除整串對話（連同分支與幽靈）。範圍見 _collect_delete_scope；起點不屬於本人 → 404。
 
-    流程：
-    1. 起點必須屬於本人（不是本人或不存在 → 404），在任何刪除之前檢查。
-    2. 算出範圍（見 _collect_delete_scope）：訊息集合 D、分支集合 B，
-       包含錨在對話內的分支、底部入口、空分支，以及 attach_root_id 落在對話內的幽靈（連同它的訊息）。
-       attach_root_id 為 NULL 的舊幽靈不屬於任何對話，保留不動。
-    3. D 或 B 內任何一列不屬於本人 → rollback、寫 log、回 500（固定訊息），不刪任何資料。
-    4. 同一個交易：B 的 anchor／root／attach／parent_branch_id 設 NULL；
-       不在 B 但 parent_branch_id 落在 B 的分支，parent_branch_id 設 NULL；
-       一條 DELETE 刪 D；一條 DELETE 刪 B。PostgreSQL 的一般外鍵在每個 SQL 指令結束時才檢查，
-       所以同一條 DELETE 裡父子一起消失不會擋。
-    5. 任何資料庫錯誤（含 commit）→ rollback、完整錯誤寫 log、回 500「Failed to delete chat」，不回傳錯誤細節。
-    6. 成功回 {"status": "ok", "deleted_count": 訊息數, "deleted_branches": 分支數}。
+    範圍內任何列不屬於本人，或交易失敗，都 rollback 並回 500（固定訊息，不回傳錯誤細節）。
+    PostgreSQL 的 FK 在每條 SQL 結束時才檢查，所以同一條 DELETE 內父子一起刪除不會擋。
     """
-    # 1. 起點必須屬於本人，在任何刪除之前
+    # 起點必須屬於本人，在任何刪除之前
     get_owned_message(session, root_id, user, detail="Chat not found")
 
-    # 2. 範圍
     D, B = _collect_delete_scope(session, root_id)
     D_list = list(D)
     B_list = list(B)
 
-    # 3. 擁有者檢查：範圍內任何一列不是本人的，整個中止
+    # 範圍內任何一列不是本人的，整個中止
     foreign_msgs = session.exec(select(Message.id).where(
         Message.id.in_(D_list), Message.user_id != user.id
     )).all() if D_list else []
@@ -1047,8 +1001,7 @@ def delete_chat(
         )
         raise HTTPException(status_code=500, detail="Failed to delete chat")
 
-    # 4. 同一個交易：先解開分支指向訊息與分支的引用，再刪訊息、刪分支
-    # (B11) 只用 Core 語法的批次 UPDATE／DELETE，不 add／delete ORM 物件，避免過期物件造成的副作用。
+    # 同一交易：先解開分支的引用，再刪訊息與分支；只用 Core 批次 UPDATE/DELETE，避免 ORM 物件過期的副作用
     try:
         if B_list:
             session.execute(
@@ -1093,7 +1046,7 @@ def get_chat_tree(
     """
     取得整棵對話樹的「所有」節點 (用來畫前端的 React Flow 樹狀圖)
     """
-    # (S-U1-4) 起點必須屬於本人，否則 404
+    # 起點必須屬於本人，否則 404
     get_owned_message(session, root_id, user)
 
     query = text("""
@@ -1123,7 +1076,7 @@ def demote_overlaps(
     end: int,
     exclude_id: uuid.UUID | None = None,
 ) -> list[str]:
-    """(E1) 把同一則回覆上、與 [start, end) 重疊的 inline 分支降級為底部入口。
+    """把同一則回覆上、與 [start, end) 重疊的 inline 分支降級為底部入口。
 
     重疊判定（半開區間）：舊.start < end 且 start < 舊.end；相鄰不算重疊。
     降級 = anchor_start／anchor_end 清空，其他欄位（anchor_message_id、anchor_text、title）不動。
@@ -1149,7 +1102,7 @@ def demote_overlaps(
 
 
 def _find_tree_root(session: Session, msg: Message) -> Message:
-    """(E2) 沿 parent_id 往上走，回傳 parent_id 為 NULL 的樹根訊息。"""
+    """沿 parent_id 往上走，回傳 parent_id 為 NULL 的樹根訊息。"""
     cur = msg
     seen: set = set()
     while cur.parent_id is not None and cur.id not in seen:
@@ -1162,7 +1115,7 @@ def _find_tree_root(session: Session, msg: Message) -> Message:
 
 
 def _is_ancestor_or_self(session: Session, ancestor_id: uuid.UUID, descendant_id: uuid.UUID) -> bool:
-    """(E2) ancestor_id 是否為 descendant_id 本身或其祖先。"""
+    """ancestor_id 是否為 descendant_id 本身或其祖先。"""
     return session.exec(
         text("""
         WITH RECURSIVE ancestors AS (
@@ -1178,16 +1131,16 @@ def _is_ancestor_or_self(session: Session, ancestor_id: uuid.UUID, descendant_id
 
 
 class RelinkBranchRequest(BaseModel):
-    """(E2) 幽靈分支重連：把它接到 root 這棵樹裡的某則訊息的一段文字上。"""
+    """幽靈分支重連：把它接到 root 這棵樹裡的某則訊息的一段文字上。"""
     root_id: uuid.UUID
     anchor_message_id: uuid.UUID
     anchor_start: int | None = None
     anchor_end: int | None = None
-    anchor_text: str | None = Field(default=None, max_length=5000)  # (B13)
+    anchor_text: str | None = Field(default=None, max_length=5000)
 
 
 def _branch_response(branch: Branch, reused: bool, demoted_ids: list[str]) -> dict:
-    """(E1) 建立分支的回傳格式（新建與重用共用）。"""
+    """建立分支的回傳格式（新建與重用共用）。"""
     return {
         "branch_id": str(branch.id),
         "anchor_message_id": str(branch.anchor_message_id) if branch.anchor_message_id else None,
@@ -1203,7 +1156,7 @@ def _branch_response(branch: Branch, reused: bool, demoted_ids: list[str]) -> di
 
 
 @app.post("/chats/{root_id}/branches")
-@limiter.limit("30/minute", key_func=rate_limit_key)  # (B13)
+@limiter.limit("30/minute", key_func=rate_limit_key)
 def create_branch(
     request: Request,
     root_id: uuid.UUID,
@@ -1211,25 +1164,14 @@ def create_branch(
     session: Session = Depends(get_session),
     user: User = Depends(get_current_user),
 ):
-    """
-    (P2-9) 從某則既有訊息 (anchor) 分岔出一條新分支。
-
-    流程：
-    1. 驗證 root 與 anchor 都存在，且 anchor 真的位於 root 這棵樹上。
-    2. 直接建立 Branch：root_message_id 先留 None，等這條分支的第一則
-       user 訊息送出時，由 /chat 回填 (見 chat_endpoint)。
-       為什麼不再預建第一則 user 訊息：使用者可能只是想「先開一條分支」，
-       預先塞空訊息會在樹上留下沒有內容的節點，也讓 root 的語意變模糊。
-    3. 把整棵樹的根標記 has_branch = True，commit。
-    """
-    # --- 1. 驗證 ---
-    # (S-U1-4) root 與 anchor 都必須屬於本人（不存在與不屬於本人都是 404）
+    """從 anchor 訊息分岔出新分支。root_message_id 留空，等第一則 user 訊息由 /chat 回填（不預建空訊息）。"""
+    # root 與 anchor 都必須屬於本人（不存在與不屬於本人都是 404）
     root_msg = get_owned_message(session, root_id, user, detail="Chat not found")
     anchor_msg = get_owned_message(
         session, payload.anchor_message_id, user, detail="Anchor message not found"
     )
 
-    # 簡單驗證 anchor 屬於 root 這棵樹：從 anchor 往上遞迴找祖先，看是否會走到 root
+    # anchor 須位於 root 這棵樹上：從 anchor 往上找祖先，看是否走到 root
     belongs = session.exec(
         text("""
         WITH RECURSIVE ancestors AS (
@@ -1247,7 +1189,7 @@ def create_branch(
             status_code=400, detail="Anchor message does not belong to this chat"
         )
 
-    # --- 1b. offset 驗證（E1）：在任何寫入之前；start／end 必須成對，且 0 <= start < end <= 回覆長度 ---
+    # offset 驗證（在任何寫入之前）：start／end 必須成對，且 0 <= start < end <= 回覆長度
     if (payload.anchor_start is None) != (payload.anchor_end is None):
         raise HTTPException(status_code=422, detail="anchor_start and anchor_end must be given together")
     has_offset = payload.anchor_start is not None
@@ -1256,7 +1198,7 @@ def create_branch(
         if not (0 <= payload.anchor_start < payload.anchor_end <= content_len):
             raise HTTPException(status_code=422, detail="anchor offsets out of range")
 
-        # 1c. 範圍完全相同的非幽靈分支已存在 → 不新建、不降級，直接回傳它（E1）
+        # 範圍完全相同的非幽靈分支已存在：不新建、不降級，直接回傳
         existing = session.exec(
             select(Branch)
             .where(
@@ -1270,13 +1212,13 @@ def create_branch(
         if existing is not None:
             return _branch_response(existing, reused=True, demoted_ids=[])
 
-    # --- 2. Branch 本體（title 取 anchor_text 的單行前 50 字）---
+    # title 取 anchor_text 單行前 50 字
     if payload.anchor_text and payload.anchor_text.strip():
         title = " ".join(payload.anchor_text.split())[:50]
     else:
         title = "新分支"
 
-    # (E1) 有 offset 才檢查重疊：重疊的舊分支降級為底部入口（與下面的建新同一個 commit）
+    # 有 offset 才檢查重疊：重疊的舊分支降級為底部入口（與下面的建新同一個 commit）
     demoted_ids: list[str] = []
     if has_offset:
         demoted_ids = demote_overlaps(
@@ -1297,7 +1239,6 @@ def create_branch(
     session.add(branch)
     session.flush()  # 取得 branch.id
 
-    # --- 3. 標記整棵樹的根 ---
     root_of_tree = root_msg
     if root_msg.parent_id is not None:
         # root_id 若不是樹根，往上找出 parent_id IS NULL 的那一則
@@ -1332,15 +1273,7 @@ def list_branches(
     session: Session = Depends(get_session),
     user: User = Depends(get_current_user),
 ):
-    """
-    (P2-11) 列出「錨定在這棵對話樹內」的所有分支。
-    (S-U1-4) root 必須屬於本人，否則 404。
-
-    判定方式：從 root_id 出發，沿著 parent_id 往下遞迴展開所有子孫訊息，
-    得到這棵樹的完整 message id 集合；再取出 anchor_message_id 落在集合內的分支。
-    這樣即使 UI 傳來的 root_id 只是樹中間的某一則訊息，也能正確取到該子樹的分支。
-    以 created_at 升冪排序 (分支建立順序，前端可穩定渲染)。
-    """
+    """列出錨定在 root 所屬子樹內的分支（root 必須屬於本人，否則 404），依 created_at 升冪。"""
     get_owned_message(session, root_id, user)
 
     query = text("""
@@ -1364,7 +1297,7 @@ def list_branches(
         {
             "id": str(row["id"]),
             "title": row["title"],
-            # (G6-1) anchor 可能為 NULL（幽靈／底部入口），不可產生字串 "None"
+            # anchor 可能為 NULL（幽靈／底部入口），不可產生字串 "None"
             "anchor_message_id": str(row["anchor_message_id"]) if row["anchor_message_id"] else None,
             "anchor_text": row["anchor_text"],
             "anchor_start": row["anchor_start"],
@@ -1383,12 +1316,7 @@ def list_orphaned_branches(
     session: Session = Depends(get_session),
     user: User = Depends(get_current_user),
 ):
-    """
-    (E2) 幽靈分支清單（給分支面板的「幽靈分支」區與選字時的「連結幽靈分支」選單）。
-
-    (S-U1-4) 歸屬只看 Branch.user_id（等於目前登入者）；其他使用者的分支不列出。
-    依 created_at 新到舊。
-    """
+    """幽靈分支清單（只列 user_id 為目前登入者的分支），依 created_at 新到舊。"""
     rows = session.exec(
         select(Branch)
         .where(Branch.is_orphaned == True, Branch.user_id == user.id)  # noqa: E712
@@ -1407,7 +1335,7 @@ def list_orphaned_branches(
 
 
 @app.post("/branches/{branch_id}/relink")
-@limiter.limit("30/minute", key_func=rate_limit_key)  # (B13)
+@limiter.limit("30/minute", key_func=rate_limit_key)
 def relink_branch(
     request: Request,
     branch_id: uuid.UUID,
@@ -1415,18 +1343,10 @@ def relink_branch(
     session: Session = Depends(get_session),
     user: User = Depends(get_current_user),
 ):
-    """
-    (E2) 把幽靈分支接回 root 這棵對話上的一段文字（變成 inline 高亮）。
+    """把幽靈分支接回 root 樹上某段文字（變回 inline 高亮）。title 不變。
 
-    檢查順序：
-    1. 404：分支、root、錨點訊息任一個不存在或不屬於目前登入者。
-       一律 404，不洩漏是否存在；都在任何 409／422 之前。
-    2. 409：不是幽靈（is_orphaned 不是 True）。
-    3. 422：anchor_start／anchor_end 必須成對；有帶時 0 <= start < end <= 回覆長度。
-    4. 400：錨點不在 root 這棵樹上，或錨點位於分支自己的訊息之下（會形成循環）。
-    5. 409：同一則上已有範圍完全相同的非幽靈分支（不寫入）。
-    通過後同一個 commit：重疊的舊分支降級（exclude 自己）→ 設錨點、is_orphaned=False、attach_root_id=NULL；
-    分支首則訊息 parent_id／anchor_message_id 接到新錨點；樹根 has_branch=True。title 不變。
+    檢查順序：404（不洩漏存在）→ 409（非幽靈）→ 422（offset）→ 400（錨點不在樹上或位於分支內）→ 409（同範圍已存在）。
+    通過後同一交易：降級重疊的舊分支、設錨點、attach_root_id=NULL、分支首則接到新錨點、樹根 has_branch=True。
     """
     # 1. 404（不洩漏存在與否）：分支、root、錨點都必須屬於本人
     branch = get_owned_branch(session, branch_id, user, detail="Branch not found")
@@ -1469,7 +1389,7 @@ def relink_branch(
         if same is not None:
             raise HTTPException(status_code=409, detail="A branch with the same range already exists")
 
-    # --- 寫入（同一個交易）---
+    # 同一交易寫入
     demoted_ids: list[str] = []
     if has_offset:
         demoted_ids = demote_overlaps(
@@ -1519,5 +1439,5 @@ def get_model_options_endpoint(
     return {
         "presets": presets,
         "default_model": _default_model(session, presets),
-        "allow_custom": _is_linked(session, user),  # (G2-9) 只有已連結者可以輸入自訂模型
+        "allow_custom": _is_linked(session, user),  # 只有已連結者可以輸入自訂模型
     }

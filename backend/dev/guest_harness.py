@@ -1,22 +1,4 @@
-"""(G2-2) 訪客身分的測試腳本：POST /auth/guest、/auth/me 新欄位、IP 雜湊、每 IP 每日訪客上限、跨身分隔離。
-
-用法（只用臨時資料庫，不要指向正式 chat_db）：
-    cd backend && POSTGRES_DB=g2_tmp SQL_ECHO=false uv run python dev/guest_harness.py 2>&1 | grep -v sqlalchemy | tail -5
-
-做的事：
-- 在 127.0.0.1:8770 起真的 uvicorn（背景 thread），proxy_headers=True，用 X-Forwarded-For 指定每個案例的來源 IP。
-- 每個身分用自己的 httpx.Client（自己的 cookie jar）。
-- 把 main.gemini_chat_stream / main.openrouter_chat_stream 換成假串流（計數、固定輸出），絕不呼叫真模型。
-- 限流關閉（slowapi），避免測試本身被每分鐘 5 次擋住。
-- 每個 IP 用隨機前綴（10.x.y.*），重跑同一天也不會撞到前一次的計數。
-- 結束時（即使失敗）只清掉本腳本建立的 user（訊息、分支、daily_usage、auth_session 一併）
-  與本腳本用過的 IP 的 guest_ip_usage 列。
-- (G2-4) 登入時的訪客處理（G2-4-1 起）：假 GitHub provider（patch authorize_access_token /
-  _fetch_github_user，不打網路）、merge / discard、額度併入與上限、guest_session cookie、跨身分隔離、
-  交易原子性（注入失敗 → 500 且資料不動）。
-- (G2-5) 保留期限清理（G2-5-1 起）：直接回填 last_active_at / created_at / guest_ip_usage.day 後呼叫
-  guest.purge_expired_guests；背景 task 的啟動次數用計數包裝確認。
-"""
+"""訪客身分、每 IP 每日上限、登入時的訪客合併與保留期限清理的端到端測試（假串流，本機 uvicorn）。"""
 import os
 import sys
 import threading
@@ -56,7 +38,7 @@ import auth_routes  # noqa: E402
 import guest  # noqa: E402
 from models import AuthSession, Branch, DailyUsage, GuestIpUsage, Message, User  # noqa: E402
 
-# (G2-5) 背景清理的啟動計數：在 uvicorn 啟動前包一層；main._guest_purge_loop 每次呼叫時才取 guest.run_purge_once
+# 背景清理的啟動計數：在 uvicorn 啟動前包一層；main._guest_purge_loop 每次呼叫時才取 guest.run_purge_once
 PURGE_CALLS = {"n": 0}
 _real_run_purge_once = guest.run_purge_once
 
@@ -68,7 +50,7 @@ def _counting_run_purge_once() -> int:
 
 guest.run_purge_once = _counting_run_purge_once
 
-# database.py 的 echo 會印出所有 SQL；這個腳本只看測試結果，關掉它（只影響本腳本）。
+# 關掉 SQL echo，只看測試結果。
 engine.echo = False
 
 PORT = 8770
@@ -86,7 +68,7 @@ LLM_CALLS = {"n": 0}
 
 async def fake_stream(*args, **kwargs):
     """假的 LLM 串流：只計數、固定輸出，不連任何外部服務。
-    (G2-3) 訊息以 FAIL0 開頭：還沒吐出任何字就丟例外；以 FAIL1 開頭：吐一段後丟例外。"""
+    訊息以 FAIL0 開頭：還沒吐出任何字就丟例外；以 FAIL1 開頭：吐一段後丟例外。"""
     LLM_CALLS["n"] += 1
     msg = args[0] if args else kwargs.get("message", "")
     if msg.startswith("FAIL0"):
@@ -100,7 +82,7 @@ async def fake_stream(*args, **kwargs):
 main.gemini_chat_stream = fake_stream
 main.openrouter_chat_stream = fake_stream
 
-# (G2-4) 假 GitHub provider：callback 會以 GH_NEXT["id"] 當作 GitHub 使用者 id，不打任何網路。
+# 假 GitHub provider：callback 會以 GH_NEXT["id"] 當作 GitHub 使用者 id，不打任何網路。
 GH_NEXT: dict = {"id": None}
 
 
@@ -142,7 +124,6 @@ def run(fn):
         check(fn.__name__, False, f"exception: {e!r}")
 
 
-# ---------- 共用小工具 ----------
 
 def xff(ip: str) -> dict:
     return {"X-Forwarded-For": ip}
@@ -267,7 +248,6 @@ def chat(c: httpx.Client, text_msg: str, parent_id: str | None = None) -> httpx.
     return c.post("/chat", json=body)
 
 
-# ---------- 案例 ----------
 
 def c01_create_guest():
     c = new_client(ip=IP["A"])
@@ -677,16 +657,15 @@ def c22_ip_cap_concurrent():
         check("G2-3-11d sum of the 4 guests' daily_usage.count == 7", total == 7, str(total))
 
 
-# ---------- (G2-4) 登入時的訪客處理 ----------
 
 G4_PREFIX = f"10.{random.randint(0, 255)}.{random.randint(0, 255)}"
-EXTRA_IPS: list[str] = []          # (G2-4) 本次新用的 IP（結束時清 guest_ip_usage）
+EXTRA_IPS: list[str] = []          # 本次新用的 IP（結束時清 guest_ip_usage）
 OPEN_CLIENTS: list[httpx.Client] = []
-S4: dict = {}                      # (G2-4) 案例之間共用的狀態
+S4: dict = {}                      # 案例之間共用的狀態
 
 
 def fresh_ip() -> str:
-    """(G2-4) 每個訪客用一個新 IP，避免每 IP 每日 10 個訪客的上限干擾。"""
+    """每個訪客用一個新 IP，避免每 IP 每日 10 個訪客的上限干擾。"""
     ip = f"{G4_PREFIX}.{len(EXTRA_IPS) + 1}"
     EXTRA_IPS.append(ip)
     return ip
@@ -781,7 +760,7 @@ def make_guest_two_chats(ip: str) -> dict:
 
 
 def roots_of_uid(uid) -> set[str]:
-    """(G2-4) 使用者的主線對話根（與 get_chat_roots 同條件）。"""
+    """使用者的主線對話根（與 get_chat_roots 同條件）。"""
     with Session(engine) as s:
         rows = s.exec(select(Message.id).where(
             Message.user_id == uid, Message.parent_id == None, Message.branch_id == None  # noqa: E711
@@ -1111,9 +1090,8 @@ CASES = [c01_create_guest, c02_me_for_guest, c03_same_client_again, c04_guest_ch
          c21_guest_regenerate, c22_ip_cap_concurrent] + G24_CASES
 
 
-# ---------- (G2-5) 保留期限清理 ----------
 
-S5: dict = {}   # (G2-5) 案例之間共用的狀態
+S5: dict = {}   # 案例之間共用的狀態
 
 
 def now_naive() -> datetime:
@@ -1121,7 +1099,7 @@ def now_naive() -> datetime:
 
 
 def set_times(uid, created: datetime, last_active: datetime | None) -> None:
-    """(G2-5) 直接回填 user.created_at / last_active_at（None 表示 NULL）。"""
+    """直接回填 user.created_at / last_active_at（None 表示 NULL）。"""
     with Session(engine) as s:
         s.execute(sa_text('UPDATE "user" SET created_at = :c, last_active_at = :la WHERE id = :u'),
                   {"c": created, "la": last_active, "u": uid})
@@ -1129,7 +1107,7 @@ def set_times(uid, created: datetime, last_active: datetime | None) -> None:
 
 
 def make_guest_one_chat(ip: str) -> tuple[httpx.Client, uuid.UUID]:
-    """(G2-5) 訪客發一則訊息（有一個對話 root、一個 daily_usage 列）。"""
+    """訪客發一則訊息（有一個對話 root、一個 daily_usage 列）。"""
     c = mk(ip)
     r = create_guest(c, ip)
     if r.status_code != 200 or r.json().get("created") is not True:
@@ -1302,7 +1280,6 @@ G5_CASES = [g5_1_expired_guest_purged, g5_2_recent_guest_kept, g5_3_null_last_ac
             g5_7_old_cookie_rejected, g5_8_failure_isolation, g5_9_background_wiring]
 
 
-# ---------- 伺服器與清理 ----------
 
 def start_server() -> uvicorn.Server:
     config = uvicorn.Config(
@@ -1383,7 +1360,7 @@ def main_entry() -> int:
     server = None
     try:
         server = start_server()
-        for fn in CASES + G5_CASES:  # (G2-5) G5_CASES 定義在下方，這裡才組合
+        for fn in CASES + G5_CASES:  # G5_CASES 定義在下方，這裡才組合
             run(fn)
     except Exception as e:  # noqa: BLE001
         check("harness setup", False, f"exception: {e!r}")

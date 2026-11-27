@@ -1,19 +1,4 @@
-"""(E1/E2) 分支入口、重疊降級、分支列表與幽靈重連的測試腳本。
-
-用法：cd backend && uv run python dev/branch_entries_harness.py
-
-做的事：
-- 連 docker chat_db（沿用 database.py 的設定），建立兩個測試 User + AuthSession（A、B；Cookie: session=<token>），
-  測試資料都寫 user_id，結束時只清掉本腳本建立的 user／auth_session／分支／訊息。
-- 把 main.gemini_chat_stream / main.openrouter_chat_stream 換成假串流（絕不呼叫真模型）。
-- 把 main.get_free_models 換成空清單，避免白名單檢查去打 OpenRouter 的模型清單。
-- 在 127.0.0.1:8766 起真的 uvicorn（背景 thread），用 HTTP 打 API。
-- E1：建立分支的重疊降級、範圍相同重用、offset 驗證（422 且不寫入）、回傳欄位。
-- E2：regenerate 幽靈化寫 attach_root_id、幽靈清單（user 歸屬）、重連的各種拒絕、重連成功後的欄位與
-  分支對話上下文（假 LLM 收到的 history）、刪除對話時幽靈連同訊息一起刪（B11）。
-- B11：刪除對話連同分支（inline／降級／空分支）、幽靈與其巢狀分支、保留範圍、範圍內混到他人資料 → 500、
-  commit 失敗 → 500 固定訊息、生成中刪除（假 LLM 慢速串流）。
-"""
+"""分支入口、重疊降級、分支列表、幽靈重連與刪除對話的端到端測試（假串流，本機 uvicorn）。"""
 import asyncio
 import os
 import sys
@@ -21,7 +6,7 @@ import threading
 import time
 import uuid
 
-# (V1-2) 每日額度改為很大的值：這些案例要測的不是額度，避免大量請求撞到每日上限。
+# 每日額度改為很大的值：這些案例要測的不是額度，避免大量請求撞到每日上限。
 os.environ["DAILY_MESSAGE_LIMIT"] = "100000"
 os.environ["SITE_DAILY_MESSAGE_LIMIT"] = "1000000"
 BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -37,7 +22,7 @@ from database import engine  # noqa: E402
 import auth_routes  # noqa: E402
 from models import AuthSession, Branch, Message, User  # noqa: E402
 
-# database.py 的 echo=True 會印出每一句 SQL，這個腳本只要看測試結果，關掉它（只影響本腳本）。
+# 關掉 SQL echo，只看測試結果。
 engine.echo = False
 
 PORT = 8766
@@ -46,13 +31,13 @@ BASE = f"http://127.0.0.1:{PORT}"
 # 不讓白名單檢查去抓 OpenRouter 免費模型清單（外部網路）
 main.get_free_models = lambda session, force_refresh=False: []
 
-# (E2) 假串流：記錄每次收到的 history（role, content），只 yield 固定文字，不連任何外部服務。
+# 假串流：記錄每次收到的 history（role, content），只 yield 固定文字，不連任何外部服務。
 LLM_CALLS: list[dict] = []
 
 
 async def fake_stream(message, history, model):
     LLM_CALLS.append({"message": message, "history": [(m.role, m.content) for m in history]})
-    if message.startswith("SLOW"):  # (B11 g) 生成中刪除：等 SLOW_GATE 再吐字
+    if message.startswith("SLOW"):  # 生成中刪除：等 SLOW_GATE 再吐字
         while not SLOW_GATE.is_set():
             await asyncio.sleep(0.02)
     for chunk in ["MOCK-E2-", "REPLY"]:
@@ -214,15 +199,15 @@ def seed(uid, uid_other) -> dict:
 
 
 def run_e1_tests(client: httpx.Client, ids: dict, out: dict):
-    """E1 測試。out 用來把之後 E2 會用到的 branch id 傳出去（b1、b2、ov 等）。"""
+    """out 收集後續案例要用的 branch id（b1、b2、ov 等）。"""
     root_id = ids["R"]
     uid = out["uid"]
-    # E1 測試各用獨立的 AI 回覆（與 E2 的主線 A／A2 分開，互不影響）
+    # 各用獨立的 AI 回覆（與主線 A／A2 分開，互不影響）
     ai_e1 = _make_ai(root_id, uid=uid, text="0123456789" * 4)   # 主要測試對象
-    ai_other = _make_ai(root_id, uid=uid, text="ABCDEFGHIJ" * 4)  # E1-e：不同則同 offset
-    ai_double = _make_ai(root_id, uid=uid, text="abcdefghij" * 4)  # E1-f：雙重疊
+    ai_other = _make_ai(root_id, uid=uid, text="ABCDEFGHIJ" * 4)  # 不同則同 offset
+    ai_double = _make_ai(root_id, uid=uid, text="abcdefghij" * 4)  # 雙重疊
 
-    # ---- E1-a. 無重疊 → reused=false、demoted_ids=[]；回傳含 title/reused/demoted_ids ----
+    # 無重疊 → reused=false、demoted_ids=[]；回傳含 title/reused/demoted_ids
     try:
         r = create(client, root_id, ai_e1, "B1 text", 0, 5)
         j = r.json()
@@ -237,7 +222,7 @@ def run_e1_tests(client: httpx.Client, ids: dict, out: dict):
         check("E1-a no overlap", False, f"exception: {e!r}")
         return
 
-    # ---- E1-b. 部分重疊 → 舊的降級（start/end NULL，其他欄位不變），新的有 offset ----
+    # 部分重疊 → 舊的降級（start/end NULL，其他欄位不變），新的有 offset
     b2 = None
     try:
         r = create(client, root_id, ai_e1, "B2 text", 3, 8)
@@ -259,7 +244,7 @@ def run_e1_tests(client: httpx.Client, ids: dict, out: dict):
     except Exception as e:
         check("E1-b partial overlap", False, f"exception: {e!r}")
 
-    # ---- E1-c. 相鄰（舊.end == 新.start）→ 不降級 ----
+    # 相鄰（舊.end == 新.start）→ 不降級
     try:
         r = create(client, root_id, ai_e1, "B3 adjacent", 8, 12)
         j = r.json()
@@ -271,7 +256,7 @@ def run_e1_tests(client: httpx.Client, ids: dict, out: dict):
     except Exception as e:
         check("E1-c adjacent", False, f"exception: {e!r}")
 
-    # ---- E1-d. 範圍完全相同 → reused=true、回傳既有 id、branch 筆數不變 ----
+    # 範圍完全相同 → reused=true、回傳既有 id、branch 筆數不變
     try:
         before = count_branches(ai_e1)
         r = create(client, root_id, ai_e1, "B2 text", 3, 8)
@@ -288,7 +273,7 @@ def run_e1_tests(client: httpx.Client, ids: dict, out: dict):
     except Exception as e:
         check("E1-d identical range", False, f"exception: {e!r}")
 
-    # ---- E1-e. 不同則訊息、同樣 offset → 不降級 ----
+    # 不同則訊息、同樣 offset → 不降級
     try:
         r = create(client, root_id, ai_other, "other msg", 3, 8)
         j = r.json()
@@ -300,7 +285,7 @@ def run_e1_tests(client: httpx.Client, ids: dict, out: dict):
     except Exception as e:
         check("E1-e other message", False, f"exception: {e!r}")
 
-    # ---- E1-f. 同時重疊兩個 → 兩個都降級 ----
+    # 同時重疊兩個 → 兩個都降級
     try:
         ra = create(client, root_id, ai_double, "D1", 0, 5).json()
         rb = create(client, root_id, ai_double, "D2", 10, 15).json()
@@ -315,7 +300,7 @@ def run_e1_tests(client: httpx.Client, ids: dict, out: dict):
     except Exception as e:
         check("E1-f double overlap", False, f"exception: {e!r}")
 
-    # ---- E1-g. 不帶 offset → 不降級任何分支，成為底部入口 ----
+    # 不帶 offset → 不降級任何分支，成為底部入口
     try:
         before_b2 = db_branch(b2) if b2 else None
         r = create(client, root_id, ai_e1, "no offset entry")
@@ -329,7 +314,7 @@ def run_e1_tests(client: httpx.Client, ids: dict, out: dict):
     except Exception as e:
         check("E1-g no offset", False, f"exception: {e!r}")
 
-    # ---- E1-h. offset 驗證：只給 start／start>=end／end 超過長度／負數 → 422 且不寫入 ----
+    # offset 驗證：只給 start／start>=end／end 超過長度／負數 → 422 且不寫入
     bad_cases = [
         ("only start", {"anchor_start": 4}),
         ("only end", {"anchor_end": 4}),
@@ -352,7 +337,7 @@ def run_e1_tests(client: httpx.Client, ids: dict, out: dict):
         except Exception as e:
             check(f"E1-h {label}", False, f"exception: {e!r}")
 
-    # ---- E1-i. GET /chats/{root}/branches：被降級者 precise=false ----
+    # GET /chats/{root}/branches：被降級者 precise=false
     try:
         r = client.get(f"/chats/{root_id}/branches")
         items = {it["id"]: it for it in r.json()} if r.status_code == 200 else {}
@@ -367,7 +352,7 @@ def run_e1_tests(client: httpx.Client, ids: dict, out: dict):
 
 
 def _make_ai(root_id, uid, text: str) -> uuid.UUID:
-    """在 root 底下另外建一則 AI 回覆（E1 測試用，各自獨立，不影響 E2 的主線）。"""
+    """在 root 底下另外建一則 AI 回覆（與主線分開，互不影響）。"""
     with Session(engine) as s:
         a = Message(role="assistant", content=text, parent_id=root_id,
                     user_id=uid, model_used="gemini-2.5-flash")
@@ -380,7 +365,7 @@ def _make_ai(root_id, uid, text: str) -> uuid.UUID:
 def run_e2_tests(client: httpx.Client, client_b: httpx.Client, ids: dict, uid, uid_other, model: str):
     R, A, A2, R2, AX = ids["R"], ids["A"], ids["A2"], ids["R2"], ids["AX"]
 
-    # ---- E2-0. 準備：在 A 上建分支 BR（[0,8)），用 /chat 送第一則（分支首則訊息綁上 root）----
+    # 準備：在 A 上建分支 BR（[0,8)），用 /chat 送第一則（分支首則訊息綁上 root）
     try:
         r = create(client, R, A, "ORIG", 0, 8)
         BR = r.json()["branch_id"]
@@ -392,7 +377,7 @@ def run_e2_tests(client: httpx.Client, client_b: httpx.Client, ids: dict, uid, u
         check("E2-0 setup", False, f"exception: {e!r}")
         return
 
-    # ---- E2-1. regenerate 幽靈化：attach_root_id = 樹根 R ----
+    # regenerate 幽靈化：attach_root_id = 樹根 R
     try:
         st, headers, _ = regen(client, A, model)
         check("E2-1 regen A: 200", st == 200, f"status={st}")
@@ -406,7 +391,7 @@ def run_e2_tests(client: httpx.Client, client_b: httpx.Client, ids: dict, uid, u
     except Exception as e:
         check("E2-1 regen ghosting", False, f"exception: {e!r}")
 
-    # ---- E2-2. 幽靈清單依 user 過濾（B 是另一位真實使用者）----
+    # 幽靈清單依 user 過濾（B 是另一位真實使用者）
     try:
         st, items = orphaned(client)
         check("E2-2 orphaned(A): 200 and contains BR", st == 200 and any(i["id"] == str(BR) for i in items),
@@ -422,7 +407,7 @@ def run_e2_tests(client: httpx.Client, client_b: httpx.Client, ids: dict, uid, u
     except Exception as e:
         check("E2-2 orphaned list", False, f"exception: {e!r}")
 
-    # ---- E2-3. attach NULL 的幽靈（歸屬 = Branch.user_id）----
+    # attach NULL 的幽靈（歸屬 = Branch.user_id）
     G_same = make_legacy_ghost(uid, "G-SAME", "same range")
     G_range = make_legacy_ghost(uid, "G-RANGE", "range")
     G_wrong = make_legacy_ghost(uid, "G-WRONG", "wrong tree")
@@ -442,7 +427,7 @@ def run_e2_tests(client: httpx.Client, client_b: httpx.Client, ids: dict, uid, u
     except Exception as e:
         check("E2-3 legacy listing", False, f"exception: {e!r}")
 
-    # ---- E2-4. 準備：A2 上的兩個非幽靈分支（OV 會被 BR 的重連降級；EX 用來測範圍完全相同 → 409）----
+    # 準備：A2 上的兩個非幽靈分支（OV 會被 BR 的重連降級；EX 用來測範圍完全相同 → 409）
     try:
         OV = create(client, R, A2, "OV", 12, 16).json()["branch_id"]
         EX = create(client, R, A2, "EX", 20, 26).json()["branch_id"]
@@ -450,7 +435,7 @@ def run_e2_tests(client: httpx.Client, client_b: httpx.Client, ids: dict, uid, u
         check("E2-4 setup OV/EX", False, f"exception: {e!r}")
         OV = EX = None
 
-    # ---- E2-5. 重連的拒絕情況（全部不寫入）----
+    # 重連的拒絕情況（全部不寫入）
     try:
         r = relink(client, uuid.uuid4(), R, A2, 10, 18)
         check("E2-5 random branch id → 404", r.status_code == 404, f"status={r.status_code}")
@@ -510,7 +495,7 @@ def run_e2_tests(client: httpx.Client, client_b: httpx.Client, ids: dict, uid, u
         except Exception as e:
             check("E2-5 same range", False, f"exception: {e!r}")
 
-    # ---- E2-6. 重連成功：BR → A2 [10,18)，與 OV [12,16) 重疊 → OV 降級 ----
+    # 重連成功：BR → A2 [10,18)，與 OV [12,16) 重疊 → OV 降級
     try:
         before_title = db_branch(BR)["title"]
         r = relink(client, BR, R, A2, 10, 18, text="RELINKED TEXT")
@@ -545,7 +530,7 @@ def run_e2_tests(client: httpx.Client, client_b: httpx.Client, ids: dict, uid, u
     except Exception as e:
         check("E2-6 relink success", False, f"exception: {e!r}")
 
-    # ---- E2-7. 非幽靈 → 409（BR 現在是非幽靈，屬於 A）----
+    # 非幽靈 → 409（BR 現在是非幽靈，屬於 A）
     try:
         before = db_branch(BR)
         r = relink(client, BR, R, A2, 0, 3)
@@ -554,7 +539,7 @@ def run_e2_tests(client: httpx.Client, client_b: httpx.Client, ids: dict, uid, u
     except Exception as e:
         check("E2-7 non-ghost", False, f"exception: {e!r}")
 
-    # ---- E2-8. 重連後在分支送訊息：假 LLM 收到的 history 以新錨點為上下文 ----
+    # 重連後在分支送訊息：假 LLM 收到的 history 以新錨點為上下文
     try:
         LLM_CALLS.clear()
         st, _, _ = chat(client, "after relink Q", RB1_AI, model, branch_id=BR)
@@ -567,7 +552,7 @@ def run_e2_tests(client: httpx.Client, client_b: httpx.Client, ids: dict, uid, u
     except Exception as e:
         check("E2-8 chat after relink", False, f"exception: {e!r}")
 
-    # ---- E2-9. 原對話被刪：幽靈連同它的訊息一起刪（B11，取代舊的「幽靈保留、attach 清成 NULL」）----
+    # 原對話被刪：幽靈連同它的訊息一起刪
     try:
         RT = _make_root(uid, "E2 tree T")
         AT = _make_ai(RT, uid, "T-AI-" * 8)
@@ -681,7 +666,6 @@ def start_server() -> uvicorn.Server:
     return server
 
 
-# ===== (B11-1) 刪除對話連同分支與幽靈 =====
 
 # f/g 用：假 LLM 在 message 以 "SLOW" 開頭時等這個事件，用來測「生成中刪除」。
 SLOW_GATE = threading.Event()
@@ -756,7 +740,7 @@ def _drop_foreign_branch(branch_id):
 
 
 class _CommitFailSession(Session):
-    """(B11 f) commit() 一律丟出含 SQL／表名的錯誤，模擬資料庫在最後一步失敗。"""
+    """commit() 一律丟出含 SQL／表名的錯誤，模擬資料庫在最後一步失敗。"""
 
     def commit(self):
         raise RuntimeError(
@@ -766,7 +750,6 @@ class _CommitFailSession(Session):
 
 
 def run_b11_tests(client: httpx.Client, client_b: httpx.Client, ids: dict, uid, uid_other, model: str):
-    # ---------- 先把所有 fixture 建好，再逐一刪除 ----------
 
     # a. 含 inline 分支（多輪）、底部入口（降級）、空分支的對話
     RA = AIA1 = AIA2 = BI = BD = BD2 = None
@@ -844,7 +827,6 @@ def run_b11_tests(client: httpx.Client, client_b: httpx.Client, ids: dict, uid, 
     check("B11-c fixture: retained rows all exist", all(v is not None for v in snap_c.values()),
           str([k for k, v in snap_c.items() if v is None]))
 
-    # ---------- 刪除 a ----------
     if RA is not None:
         r = client.delete(f"/chats/{RA}")
         check("B11-a delete chat with inline/demoted/empty branches -> 200, 9 messages, 3 branches",
@@ -856,7 +838,6 @@ def run_b11_tests(client: httpx.Client, client_b: httpx.Client, ids: dict, uid, 
         check("B11-a all 3 branches gone (DB level)", not any(branch_exists(b) for b in [BI, BD, BD2]),
               str([b for b in [BI, BD, BD2] if branch_exists(b)]))
 
-    # ---------- 刪除 b ----------
     if RG is not None:
         r = client.delete(f"/chats/{RG}")
         check("B11-b delete chat with ghost and nested branch -> 200, 5 messages, 2 branches",
@@ -868,7 +849,6 @@ def run_b11_tests(client: httpx.Client, client_b: httpx.Client, ids: dict, uid, 
         check("B11-b ghost branch and nested branch gone (DB level)",
               not branch_exists(BG) and not branch_exists(NB), "")
 
-    # ---------- c：保留的資料欄位不變 ----------
     snap_after = rows_of(retained_msgs, retained_brs)
     check("B11-c retained: legacy ghost, other chat, other user rows unchanged",
           snap_c is not None and snap_after == snap_c,
@@ -877,7 +857,6 @@ def run_b11_tests(client: httpx.Client, client_b: httpx.Client, ids: dict, uid, 
           db_branch(LEG["branch_id"])["attach_root_id"] is None and db_branch(LEG["branch_id"])["is_orphaned"] is True,
           "")
 
-    # ---------- d：不在範圍內、parent_branch_id 指向 B 的分支 ----------
     if XD is not None:
         with Session(engine) as s:
             xd = s.get(Branch, XD)
@@ -888,7 +867,6 @@ def run_b11_tests(client: httpx.Client, client_b: httpx.Client, ids: dict, uid, 
               f"exists={xd is not None} parent={parent_now} anchor={anchor_now}")
         check("B11-d parent branch BI itself deleted", not branch_exists(BI), "")
 
-    # ---------- e：範圍內混到他人的列 → 500，什麼都不刪 ----------
     RE = _make_root(uid, "B11-e root")
     AE = _make_ai(RE, uid, "B11-e-AI")
     BE = create(client, RE, AE, "e own", 0, 4).json()["branch_id"]
@@ -906,7 +884,6 @@ def run_b11_tests(client: httpx.Client, client_b: httpx.Client, ids: dict, uid, 
           r.status_code == 200 and r.json() == {"status": "ok", "deleted_count": 2, "deleted_branches": 1},
           f"status={r.status_code} body={r.text[:200]}")
 
-    # ---------- f：commit 失敗 → 500 固定訊息、資料不變 ----------
     RF = _make_root(uid, "B11-f root")
     AF = _make_ai(RF, uid, "B11-f-AI")
     BF = create(client, RF, AF, "f branch", 0, 4).json()["branch_id"]
@@ -926,7 +903,6 @@ def run_b11_tests(client: httpx.Client, client_b: httpx.Client, ids: dict, uid, 
     check("B11-f rows still exist and unchanged (new session)",
           rows_of([RF, AF], [BF]) == before_f and all(v is not None for v in before_f.values()), "")
 
-    # ---------- g：生成中刪除（假 LLM 慢速串流）----------
     SLOW_GATE.clear()
     try:
         with client.stream("POST", "/chat", json={"message": "SLOW gen", "parent_id": None, "model": model}) as rg:

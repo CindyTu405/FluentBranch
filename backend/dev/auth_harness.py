@@ -1,18 +1,4 @@
-"""(S-U1 / B10) OAuth 登入流程測試腳本（假 provider，不打任何外部網路）。
-
-用法：cd backend && uv run python dev/auth_harness.py
-
-做的事：
-- 在 127.0.0.1:8767 起真的 uvicorn（背景 thread）。
-- patch 假的 GitHub provider：authorize_redirect / authorize_access_token / _fetch_github_user。
-- 用 subprocess curl（-b/-c cookie 檔、-D 取原始標頭）逐步重播登入流程。
-  不用 httpx / TestClient 的 cookie jar 判斷，因為 Python 的 jar 會掩蓋 B10（同名 cookie 被覆蓋）。
-- (S-U1-4) 路由保護與隔離測試：列舉 app.routes 驗證未登入全部 401、使用者 B 打 A 的資料全部 404 且 A 的資料
-  與假 LLM 呼叫次數都沒變、生成中 B 讀不到緩衝、A 自己的完整流程、父子 user_id 一致、回應不含 user_id。
-  假 LLM（絕不呼叫真模型）。
-- (S-U1-9) 擁有者必填：以原始 SQL 寫入 user_id 為 NULL 的 message 與 branch，各自都必須 IntegrityError 且回復。
-- 結束時只刪本腳本建立的 user、auth_session、分支與訊息。
-"""
+"""OAuth 登入流程、路由保護與隔離、擁有者必填的端到端測試（假 provider、假 LLM，本機 uvicorn）。"""
 import asyncio
 import os
 import re
@@ -27,7 +13,7 @@ from urllib.parse import parse_qs, urlparse
 
 import httpx
 
-# (V1-2) 每日額度改為很大的值：這些案例要測的不是額度，避免大量請求撞到每日上限。
+# 每日額度改為很大的值：這些案例要測的不是額度，避免大量請求撞到每日上限。
 os.environ["DAILY_MESSAGE_LIMIT"] = "100000"
 os.environ["SITE_DAILY_MESSAGE_LIMIT"] = "1000000"
 BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -51,7 +37,7 @@ main.BUFFER_RETENTION_SECONDS = 2
 # 不讓白名單檢查去抓 OpenRouter 免費模型清單（外部網路）
 main.get_free_models = lambda session, force_refresh=False: []
 
-# (S-U1-4) 假 LLM：記錄每次呼叫；message 以 "GATED" 開頭時在中途等 GATE（用來測「生成中」）。
+# 假 LLM：記錄每次呼叫；message 以 "GATED" 開頭時在中途等 GATE（用來測「生成中」）。
 LLM_CALLS: list = []
 GATE = threading.Event()
 GATE.set()
@@ -85,7 +71,6 @@ def check(name: str, cond: bool, detail: str = ""):
     print(f"PASS {name}" if cond else f"FAIL {name}: {detail}")
 
 
-# ===== 假 provider =====
 
 async def fake_authorize_redirect(request, redirect_uri):
     state = uuid.uuid4().hex
@@ -111,7 +96,6 @@ auth_routes.oauth.github.authorize_access_token = fake_authorize_access_token
 auth_routes._fetch_github_user = fake_fetch_github_user
 
 
-# ===== curl 工具 =====
 
 def curl(url: str, jar: str, hdr_file: str) -> tuple[str, dict[str, str]]:
     """GET（不跟隨轉址），回傳 (原始標頭文字, 解析後的標頭 dict，key 小寫、只留最後一個)。"""
@@ -323,7 +307,6 @@ def run_endpoint_checks():
             auth_routes._fetch_github_user = orig_fetch
 
 
-# ===== (S-U1-4) 路由保護與隔離 =====
 
 ISO_UIDS: list = []          # 本腳本建立的使用者 id
 DOC_PATHS = {"/docs", "/redoc", "/openapi.json", "/docs/oauth2-redirect"}
@@ -487,7 +470,6 @@ def run_isolation_checks():
 
 
 def _run_isolation(ca: httpx.Client, cb: httpx.Client, uid_a, uid_b, model: str):
-    # ---------- A 的完整流程（第一段：送、列、取、建分支、分支內送、幽靈化）----------
     st, h, body = post_stream(ca, "/chat", {"message": "hello A", "model": model})
     check("A flow: send /chat -> 200 and mock reply", st == 200 and body == "MOCK-REPLY", f"{st} {body!r}")
     R, A1 = h.get("x-user-message-id"), h.get("x-message-id")
@@ -541,7 +523,6 @@ def _run_isolation(ca: httpx.Client, cb: httpx.Client, uid_a, uid_b, model: str)
           f"{r.status_code} {r.text[:200]}")
     check("A flow: orphaned no user_id key", "user_id" not in r.text)
 
-    # ---------- B 的資料 ----------
     B_ROOT = make_msg(uid_b, "user", "B root", title="B title")
     B_AI = make_msg(uid_b, "assistant", "B-AI-CONTENT", parent_id=B_ROOT)
     B_BR = make_orphan(uid_b, "B orphan")
@@ -549,7 +530,6 @@ def _run_isolation(ca: httpx.Client, cb: httpx.Client, uid_a, uid_b, model: str)
     snap0 = snap([uid_a, uid_b])
     calls0 = len(LLM_CALLS)
 
-    # ---------- B 對 A 的資料：每條路由 404 ----------
     res = foreign_matrix(cb, R, A1, BR, B_ROOT, B_AI, B_BR, model)
     for name, status in res:
         check(f"B vs A: {name} -> 404", status == 404, str(status))
@@ -569,7 +549,6 @@ def _run_isolation(ca: httpx.Client, cb: httpx.Client, uid_a, uid_b, model: str)
     check("B control: own history works", cb.get(f"/chats/{B_ROOT}/history").status_code == 200)
     check("B control: /api/free-models with login -> 200", cb.get("/api/free-models").status_code == 200)
 
-    # ---------- 生成中：B 讀不到緩衝（先查擁有者、再查 GENERATIONS）----------
     GATE.clear()
     try:
         with ca.stream("POST", "/chat", json={"message": "GATED run", "model": model}) as ra:
@@ -597,7 +576,6 @@ def _run_isolation(ca: httpx.Client, cb: httpx.Client, uid_a, uid_b, model: str)
     check("in-flight: rows unchanged for others", snap([uid_b])[0] == {k: v for k, v in snap0[0].items()
                                                                         if v[-1] == uid_b})
 
-    # ---------- A 的完整流程（第二段：重連、再送、刪除）----------
     r = ca.post(f"/branches/{BR}/relink", json={"root_id": R, "anchor_message_id": A1, "anchor_start": 0,
                                                "anchor_end": 4, "anchor_text": "MOCK"})
     check("A flow: relink -> 200", r.status_code == 200 and r.json().get("reused") is False,
@@ -612,7 +590,6 @@ def _run_isolation(ca: httpx.Client, cb: httpx.Client, uid_a, uid_b, model: str)
     check("A flow: send in relinked branch -> 200", st == 200 and body == "MOCK-REPLY", f"{st} {body!r}")
     wait_db_content(h.get("x-message-id"), "MOCK-REPLY")
 
-    # ---------- 父子 user_id 一致（限本次資料）----------
     uids = [str(uid_a), str(uid_b)]
     with Session(engine) as s:
         mismatch = s.exec(sa_text(
@@ -622,7 +599,7 @@ def _run_isolation(ca: httpx.Client, cb: httpx.Client, uid_a, uid_b, model: str)
         ), params={"u": uids}).scalar()
     check("parent/child user_id mismatch count (this run) == 0", mismatch == 0, str(mismatch))
 
-    # 刪除含分支的那串 R（B11）：R、A1、分支 BR 的首則與回覆、重連後的兩則 → 6 則訊息、1 條分支，回 200。
+    # 刪除含分支的那串 R ：R、A1、分支 BR 的首則與回覆、重連後的兩則 → 6 則訊息、1 條分支，回 200。
     r = ca.delete(f"/chats/{R}")
     check("A flow: delete chat with branch -> 200 (6 messages, 1 branch)",
           r.status_code == 200 and r.json() == {"status": "ok", "deleted_count": 6, "deleted_branches": 1},
@@ -634,7 +611,6 @@ def _run_isolation(ca: httpx.Client, cb: httpx.Client, uid_a, uid_b, model: str)
                                                                           if v[-1] == uid_b})
 
 
-# ===== (S-U1-9) 擁有者必填 =====
 
 NULL_PROBE = f"owner-null-probe-{UNIQ}"
 

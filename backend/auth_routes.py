@@ -5,7 +5,7 @@
     GET /auth/{provider}/callback   -> 換 token、取 userinfo、upsert User、發 session cookie
     POST /auth/guest                -> 建立訪客身分（伺服器建 User＋session cookie；每 IP 每日上限）
     GET /auth/me                    -> 目前登入者 (email / provider / is_guest / openrouter_connected / guest_claim)
-    POST /auth/guest-claim          -> (G2-4) 把 guest_session 指向的訪客對話合併（merge）或刪除（discard）到目前登入帳號
+    POST /auth/guest-claim          -> 把 guest_session 指向的訪客對話合併（merge）或刪除（discard）到目前登入帳號
     POST /auth/logout               -> 刪掉 DB 裡的 AuthSession、清 cookie
 
 安全設計：
@@ -29,7 +29,7 @@ import guest
 from database import get_session
 from models import GUEST_PROVIDER, AuthSession, OpenRouterCredential, User
 from oauth import is_provider_configured, oauth
-from rate_limit import limiter  # (G2-2) 單一實例，main 也會用
+from rate_limit import limiter  # 單一實例，main 也會用
 
 logger = logging.getLogger(__name__)
 
@@ -42,12 +42,10 @@ SUPPORTED_PROVIDERS = ("google", "github")
 SESSION_TTL = timedelta(days=30)
 SESSION_COOKIE_NAME = "session"
 
-# (G2-4) 登入時仍有待處理的訪客對話：訪客原始 token 放這個 cookie，TTL 1 天
+# 登入時仍有待處理的訪客對話：訪客原始 token 放這個 cookie，TTL 1 天
 GUEST_SESSION_COOKIE_NAME = "guest_session"
 GUEST_CLAIM_TTL = timedelta(days=1)
 
-
-# ===== 小工具 =====
 
 def utcnow_naive() -> datetime:
     """統一的 naive UTC 現在時間（資料庫欄位是 TIMESTAMP WITHOUT TIME ZONE）。"""
@@ -102,8 +100,6 @@ def ensure_supported_provider(provider: str) -> str:
     return provider
 
 
-# ===== 核心商業邏輯（測試會直接呼叫這幾支）=====
-
 def upsert_user(
     session: Session,
     provider: str,
@@ -147,8 +143,6 @@ def create_session_token(session: Session, user: User) -> str:
     session.commit()
     return token
 
-
-# ===== FastAPI 依賴：取得目前登入的使用者 =====
 
 def find_valid_session_user(session: Session, raw_token: Optional[str]) -> Optional[User]:
     """同 get_current_user 的查詢，但無效時回 None 而不是丟 401；不刪除任何列。"""
@@ -195,7 +189,7 @@ def get_current_user(
 
 
 def pending_guest(request: Request, session: Session, current_user: User) -> Optional[User]:
-    """(G2-4) guest_session cookie 指向的訪客，且目前登入者是非訪客、兩者不同人，才回傳該訪客；否則 None。"""
+    """guest_session cookie 指向的訪客，且目前登入者是非訪客、兩者不同人，才回傳該訪客；否則 None。"""
     g = find_valid_session_user(session, request.cookies.get(GUEST_SESSION_COOKIE_NAME))
     if g is None or not g.is_guest:
         return None
@@ -218,7 +212,7 @@ def set_session_cookie(response, token: str) -> None:
 
 
 def set_guest_session_cookie(response, token: str) -> None:
-    """(G2-4) 把訪客的原始 token 寫進 httpOnly 的 guest_session cookie（1 天）。"""
+    """把訪客的原始 token 寫進 httpOnly 的 guest_session cookie（1 天）。"""
     response.set_cookie(
         key=GUEST_SESSION_COOKIE_NAME,
         value=token,
@@ -231,7 +225,7 @@ def set_guest_session_cookie(response, token: str) -> None:
 
 
 def clear_guest_session_cookie(response) -> None:
-    """(G2-4) 清掉 guest_session cookie（屬性同 set_guest_session_cookie）。"""
+    """清掉 guest_session cookie（屬性同 set_guest_session_cookie）。"""
     response.delete_cookie(
         key=GUEST_SESSION_COOKIE_NAME,
         path="/",
@@ -246,8 +240,6 @@ async def _fetch_github_user(token: dict) -> dict:
     resp = await oauth.github.get("user", token=token)
     return resp.json()
 
-
-# ===== 路由 =====
 
 @router.get("/{provider}/login")
 async def oauth_login(provider: str, request: Request):
@@ -299,10 +291,9 @@ async def oauth_callback(
         return auth_error_redirect("login_failed")
 
     user = upsert_user(session, provider=provider, sub=str(sub), email=email)
-    user_id = user.id  # 先取純值，之後的 commit 不再碰 ORM 物件
+    user_id = user.id  # 先取純值，避免後續 commit 後碰到過期的 ORM 物件
 
-    # (G2-4) 登入前瀏覽器帶著有效的訪客 session：今日次數併入帳號；沒有對話的訪客直接刪除，
-    # 有對話的訪客保留，原始 token 改放 guest_session cookie 等使用者決定 merge / discard。
+    # 登入前的訪客：今日次數併入帳號；無對話則直接刪除，有對話則保留並把 token 放進 guest_session cookie 待使用者決定。
     incoming_token = request.cookies.get(SESSION_COOKIE_NAME)
     guest_raw_token = None
     g = find_valid_session_user(session, incoming_token)
@@ -371,7 +362,7 @@ def me(
 ):
     """目前登入者資訊（不回 id、不回金鑰任何片段）。
 
-    (G2-4) guest_claim：guest_session 指向的訪客且至少有一個對話 root 時為 {"chat_count": n}，否則 None。唯讀，不刪任何列。
+    guest_claim：guest_session 指向的訪客且至少有一個對話 root 時為 {"chat_count": n}，否則 None。唯讀，不刪任何列。
     """
     openrouter_connected = session.get(OpenRouterCredential, user.id) is not None
     guest_claim = None
@@ -404,7 +395,7 @@ def guest_claim(
     session: Session = Depends(get_session),
     user: User = Depends(get_current_user),
 ):
-    """(G2-4) 把 guest_session 指向的訪客對話合併到目前登入帳號（merge），或直接刪除（discard）。
+    """把 guest_session 指向的訪客對話合併到目前登入帳號（merge），或直接刪除（discard）。
 
     身分只來自兩個 cookie（session＝登入者、guest_session＝訪客），請求 body 不接受任何 user／guest／chat id。
     單一交易：merge 先搬移再刪訪客列；discard 直接刪訪客與其資料；最後一次 commit。

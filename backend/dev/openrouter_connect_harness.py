@@ -1,16 +1,4 @@
-"""(G2-8) OpenRouter 連結（OAuth PKCE）測試腳本：connect / callback / DELETE、加密儲存、state 一次性、跨身分、洩漏檢查。
-
-用法（只用臨時資料庫 g2_tmp，不要指向正式 chat_db）：
-    cd backend && POSTGRES_DB=g2_tmp SQL_ECHO=false uv run python dev/openrouter_connect_harness.py 2>&1 | grep -v sqlalchemy | tail -5
-
-做的事：
-- 在一個自由 port 起真的 uvicorn（背景 thread），proxy_headers=True。
-- 每次執行在程序內產生新的 Fernet 金鑰放進 CREDENTIAL_ENCRYPTION_KEY（不讀任何 .env）。
-- 把 openrouter_connect.exchange_code_for_key 換成假函式：記錄參數，回傳假金鑰 sk-or-v1-FAKEKEY-*。絕不呼叫 OpenRouter。
-- 包裝 openrouter_connect.secrets，記下伺服器產生的每個 code_verifier 與 state，供最後的洩漏檢查使用。
-- stdout、stderr 與所有 logger（含 uvicorn.access，INFO 等級）都寫進 CAPTURE，最後檢查裡面沒有任何機密。
-- 結束時（即使失敗）只清掉本腳本建立的 user、session、openrouter_credential 與 guest_ip_usage 列。
-"""
+"""OpenRouter 連結（OAuth PKCE）的連線、加密儲存、state 一次性與洩漏檢查的測試。"""
 import contextlib
 import io
 import logging
@@ -29,8 +17,8 @@ sys.path.insert(0, BACKEND_DIR)
 
 os.environ["CORS_ORIGINS"] = "http://localhost:5173"
 os.environ["FRONTEND_URL"] = "http://localhost:5173"
-os.environ["ALLOWED_MODELS"] = "gemini-2.5-flash-lite,vendor/free-model"  # (G2-9) 非 gemini 的白名單模型供試用者測試
-os.environ["DAILY_MESSAGE_LIMIT"] = "2"  # (G2-9) 試用者每日 2 則，連結者不受限
+os.environ["ALLOWED_MODELS"] = "gemini-2.5-flash-lite,vendor/free-model"  # 非 gemini 的白名單模型供試用者測試
+os.environ["DAILY_MESSAGE_LIMIT"] = "2"  # 試用者每日 2 則，連結者不受限
 
 from cryptography.fernet import Fernet  # noqa: E402
 import httpx  # noqa: E402
@@ -50,7 +38,7 @@ if engine.url.database != "g2_tmp":
     print("REFUSED: this harness only runs against the g2_tmp database (POSTGRES_DB=g2_tmp)")
     sys.exit(1)
 
-# ---------- log / stdout 擷取（必須在 uvicorn 建立 config 之前安裝）----------
+# 必須在 uvicorn 建立 config 之前安裝 log 擷取
 CAPTURE = io.StringIO()
 
 
@@ -99,7 +87,6 @@ main.get_free_models = lambda session, force_refresh=False: []  # 不去抓 Open
 FRONTEND = "http://localhost:5173"
 OR_AUTH = "https://openrouter.ai/auth"
 
-# ---------- 假的 exchange 與 secrets 間諜 ----------
 EX = {"calls": [], "key": None, "mode": "key"}   # mode: "key" 回傳 EX["key"]；"none" 回傳 None
 ALL_KEYS: list[str] = []      # 本次測試產生過的假金鑰
 ALL_CODES: list[str] = []     # 送進 callback 的 code
@@ -147,7 +134,6 @@ def new_fake_key() -> str:
     return k
 
 
-# ---------- 結果 ----------
 RESULTS: list[tuple[str, bool, str]] = []
 CREATED_UIDS: list[uuid.UUID] = []
 PREFIX = f"10.{random.randint(0, 255)}.{random.randint(0, 255)}"
@@ -189,7 +175,6 @@ def env(**kv):
                 os.environ[k] = v
 
 
-# ---------- 身分與 client ----------
 
 def mk_client() -> httpx.Client:
     c = httpx.Client(base_url=BASE, timeout=30, follow_redirects=False, event_hooks={"response": [_keep_body]})
@@ -288,7 +273,6 @@ def connect_and_finish(c: httpx.Client, key: str) -> tuple[httpx.Response, str]:
     return do_callback(c, state, code), code
 
 
-# ---------- 案例 ----------
 
 def c01_connect_redirect():
     token, uid = new_account("A")
@@ -549,7 +533,7 @@ def c15_leak_check():
 
 
 def c18_access_log_redacted():
-    """access log 必須開著（不是靠關掉 log 才通過 case 15）：應看到 /auth/openrouter/callback?[redacted]，且沒有 state= / code=。"""
+    """access log 必須開著：應看到 /auth/openrouter/callback?[redacted]，且沒有 state= / code=。"""
     needle = "/auth/openrouter/callback?[redacted]"
     seen = wait_for(lambda: needle in CAPTURE.getvalue(), timeout=5.0)
     text = CAPTURE.getvalue()
@@ -568,7 +552,6 @@ def wait_for(pred, timeout: float = 5.0) -> bool:
     return pred()
 
 
-# ---------- (G2-9) 使用者自己的金鑰生成 ----------
 # 假的 OpenRouter（同一個程序內另一個 port）；真正的 openrouter_chat_stream 會打到它。
 USER_KEY_INVALID_LIT = "⚠️ 你的 OpenRouter 連結已失效，請重新連結"   # 字面值（與 main 常數獨立比對）
 USER_KEY_CREDIT_LIT = "⚠️ 你的 OpenRouter 帳號額度不足"
@@ -581,7 +564,7 @@ UNLISTED = "openai/gpt-x"
 FAKE = {"log": [], "mode": {}, "hook": {}}  # log: 每次上游請求的 auth/model；mode: key→HTTP 狀態；hook: key→一次性 callable
 GEM = {"n": 0}                        # 直連 Gemini 的呼叫次數（應該不會增加）
 BODIES: list[bytes] = []              # 測試端收到的所有 HTTP 回應本文（洩漏檢查用）
-G9: dict = {}                         # G2-9 案例之間共用的狀態
+G9: dict = {}                         # 案例之間共用的狀態
 G9_UIDS: list[uuid.UUID] = []
 
 
@@ -601,7 +584,7 @@ async def fake_gemini(message, history, model="gemini-2.5-flash-lite"):
     yield "GEMINI-DIRECT"
 
 
-main.gemini_chat_stream = fake_gemini  # (G2-9) 直連 Gemini 的記錄器；連結者必須保持 0 次
+main.gemini_chat_stream = fake_gemini  # 直連 Gemini 的記錄器；連結者必須保持 0 次
 
 
 def _sse(model: str, delta: dict, finish) -> bytes:
@@ -1028,7 +1011,6 @@ CASES = [
 ]
 
 
-# ---------- server / cleanup ----------
 
 def free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
